@@ -5,6 +5,10 @@ Copyright (c) 2022 Marcus Grum
 """
 
 __author__ = 'Marcus Grum, marcus.grum@uni-potsdam.de'
+
+# with friendly permissions by Marcus Grum:
+__thesis_author__ = 'Lena Siegmund, siegmund2@uni-potsdam.de'
+
 # SPDX-License-Identifier: AGPL-3.0-or-later or individual license
 # SPDX-FileCopyrightText: 2022 Marcus Grum <marcus.grum@uni-potsdam.de>
 
@@ -16,15 +20,17 @@ import csv
 import os
 import platform
 import numpy
+import socket
 
 # import experiments
 import sys
 sys.path.insert(0, '../experiments')
-import experiment01, experiment02, experiment03, experiment04, experiment05
+#import experiment01, experiment02, experiment03, experiment04, experiment05
 
 # specify global variables, so that they are known (1) at messageClient start and (2) at function calls from external scripts
 global hostName, hostArch, logDirectory
-hostName = os.uname()[1]
+# hostName = os.uname()[1]
+hostName = os.name
 hostArch = platform.machine()
 logDirectory = "./logs"  # = $PWD/logs
 try:
@@ -36,6 +42,23 @@ except Exception:
     hostArch = hostArch + ""
 if not os.path.exists(logDirectory):
     os.makedirs(logDirectory)
+
+
+# lokale IP Adresse des Geräts herausfinden, damit man es nicht immer selber im Code festlegen muss
+def get_local_ip():
+    try:
+        # Verbindung zu einer nicht existierenden Adresse (um das Netzwerkinterface zu bestimmen)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))  # 8.8.8.8 ist ein öffentlicher DNS-Server von Google
+            ip_address = s.getsockname()[0]  # Hol dir die IP-Adresse des Geräts
+        return ip_address
+    except Exception as e:
+        print(f"Fehler beim Abrufen der IP-Adresse: {e}")
+        return None
+
+# IP-Adresse abrufen
+local_ip = get_local_ip()
+print(f"Lokale IP-Adresse: {local_ip}")
 
 def load_data_fromfile(path):
     """
@@ -126,7 +149,7 @@ def on_message(client, userdata, msg):
           # realize scenario, such as create_annSolution / apply_annSolution / refine_annSolution / publish_annSolution #/ realize_annExperiment
           realize_scenario(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, sub_process_method="parallel")
 
-          print('Message of ' + sender + ' has been initiated at ' + receiver + ' by ' + hostName + '(' + os.uname()[1] + ') successfully!')
+          print('Message of ' + sender + ' has been initiated at ' + receiver + ' by ' + hostName + '(' + os.name + ') successfully!')
 
 
 def unroll_message(message):
@@ -974,9 +997,18 @@ if __name__ == '__main__':
      - If continual changes occure, a new AI case (and corresponding images) are released.
      """
 
-     # optionally input parameters from CLI to rename host
-     if (sys.argv[1] != ""):
-          hostName = sys.argv[1]
+
+
+# optionally input parameters from CLI to rename host
+    #  if (sys.argv[1] != ""):
+     #       hostName = sys.argv[1]
+     if len(sys.argv) > 1 and sys.argv[1] != "":
+        # Das Argument existiert und ist nicht leer
+        print("Argument gefunden:", sys.argv[1])
+     else:
+     # Kein Argument vorhanden oder Argument ist leer
+         print("Kein Argument gefunden oder Argument ist leer.")
+
 
      # specify client for messaging
      client = mqtt.Client()
@@ -984,13 +1016,31 @@ if __name__ == '__main__':
      client.on_message = on_message
      client.username_pw_set(username="user1", password="password1")
 
-     # specify server for messaging
-     global MQTT_Broker
+ # Broker einkommentieren
      # MQTT_Broker = "test.mosquitto.org" # world wide network via public test server (communication can be seen by everyone)
      # MQTT_Broker = "broker.hivemq.com" # world wide network via public test server (communication can be seen by everyone)
      # MQTT_Broker = "iot.eclipse.org"   # world wide network via public test server (communication can be seen by everyone)
      # communication in local network (start server with /usr/local/sbin/mosquitto -c /usr/local/etc/mosquitto/mosquitto.conf )
+    # broker IP setzen
+
+     # bei patrick
+     # MQTT_Broker = "192.168.1.31"
+
+     # zu hause
+     #MQTT_Broker = "192.168.178.21" 
+
+     # Uni Griebnitzsee
+     # MQTT_Broker = "10.15.18.169"
+
+     # wenn der Broker auf dem selben Gerät läuft, wie auch gerade der Code, kann man die ip einfach über local ip senden, 
+     # dazu muss aber glaub ich die Firewall unten sein sonst gibts einen Fehler
+     # MQTT_Broker = local_ip
+
+     # oder
      MQTT_Broker = "localhost"
+
+     # Raspi zu hause
+     # MQTT_Broker = "192.168.178.53"
 
      # establish connection of client and server
      # - Method 1 - connect via plain MQTT protocol
