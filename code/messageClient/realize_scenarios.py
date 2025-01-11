@@ -736,7 +736,7 @@ def unroll_sensorValuesFromScenario(message):
 
 def realize_scenario(
           logDirectory, 
-          MQTT_Topic_CoNM,
+          MQTT_Topic_Results,
           scenario, 
           knowledge_base, 
           activation_base,
@@ -785,6 +785,7 @@ def realize_scenario(
                # subprocess.call("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
                subprocess.run("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
                print('Message of ' + sender + ' has been processed at ' + receiver + ' successfully!')
+               client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')
 
           if (sub_process_method == "parallel"):
                # b) by subprocess.Popen()
@@ -794,6 +795,8 @@ def realize_scenario(
                     # carry out current scenario
                     p = subprocess.Popen("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
                     print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
+                    client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')
+
 
      # If new knowledgeBase needs to be published to docker's hub, when create or refine scenarios have been finalized:
      if (scenario == 'publish_annSolution'):
@@ -837,12 +840,12 @@ def realize_scenario(
                     p.wait(timeout=None)
                     if (scenario == 'apply_annSolution_for_imageClassification'):
                          # announce finalization of ANN requests
-                         client.publish(MQTT_Topic_CoNM, 'This is a result indication! My name is '+ hostName+' and I have processed the ann request.')
+                         client.publish(MQTT_Topic_Results, 'This is a result indication! My name is '+ hostName+' and I have processed the ann request.')
                     if (scenario == 'apply_annSolution_for_transportClassification'):
                          # announce finalization of ANN requests
-                         client.publish(MQTT_Topic_CoNM, 'This is a result indication! My name is '+ hostName+' and I have processed the ann request.')
+                         client.publish(MQTT_Topic_Results, 'This is a result indication! My name is '+ hostName+' and I have processed the ann request.')
                     if (scenario == 'manual_sensorValueUpdate'): # this can be used for testing
                          # announce finalization of sensor update
                          # maybe put this in a separate client, so that ANN requests can be realized at AI-Lab 
                          # and decentralized systems can be virtually realized at production systems...?
-                         client.publish(MQTT_Topic_CoNM, 'This is a sonsor update indication! My name is '+ hostName+' and I have updated the files by given values.')
+                         client.publish(MQTT_Topic_Results, 'This is a sonsor update indication! My name is '+ hostName+' and I have updated the files by given values.')

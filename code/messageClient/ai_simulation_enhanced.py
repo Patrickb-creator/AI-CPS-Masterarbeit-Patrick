@@ -31,9 +31,9 @@ sys.path.insert(0, '../experiments')
 # specify global variables, so that they are known (1) at messageClient start and (2) at function calls from external scripts
 global hostName, hostArch, logDirectory
 # hostName = os.name
-# hostName = "LenasPC"
+hostName = "LenasPC"
 hostArch = platform.machine()
-logDirectory = "./logs"  # = $PWD/logs
+logDirectory = "C:/Users/lenag/OneDrive/Dokumente/AUni/Masterarbeit/AI-CPS-Masterarbeit-Lena/code/messageClient/logs" 
 try:
     subprocess.check_output('nvidia-smi')
     print('Nvidia GPU detected!')
@@ -44,7 +44,15 @@ except Exception:
 if not os.path.exists(logDirectory):
     os.makedirs(logDirectory)
 
-MQTT_Topic = 'mqttTester'
+hostArch = hostArch.lower()
+
+if hostArch == 'amd64':
+     hostArch = 'x86_64'
+if hostArch == 'amd_64_gpu':
+     hostArch = 'x86_64_gpu'
+
+MQTT_Topic_Execute = 'mqttTester'
+MQTT_Topic_Results = 'mqttTester/results'
 
 # lokale IP Adresse des Geräts herausfinden, damit man es nicht immer selber im Code festlegen muss
 def get_local_ip():
@@ -111,7 +119,8 @@ def on_connect(client, userdata, flags, rc):
 
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
-    client.subscribe(MQTT_Topic, qos=0)  # channel to deal with CoNM
+    client.subscribe(MQTT_Topic_Execute, qos = 0)  # channel to deal with CoNM
+    client.subscribe(MQTT_Topic_Results, qos = 0)
     # ...
 
 # The callback for when a PUBLISH message is received from the server.
@@ -149,7 +158,7 @@ def on_message(client, userdata, msg):
           # realize scenario, such as create_annSolution / apply_annSolution / refine_annSolution / publish_annSolution #/ realize_annExperiment
           executor.realize_scenario(
               logDirectory, 
-              MQTT_Topic, 
+              MQTT_Topic_Results, 
               scenario, 
               knowledge_base, 
               activation_base, 
@@ -256,12 +265,12 @@ if __name__ == '__main__':
      # 1. in cmd mosquitto_pub -h localhost -t "mqttTester" -m "Huhu"
      # 2. in cmd mosquitto_sub -h localhost -t "mqttTester"
      # 3. Code starten
-     MQTT_Topic = 'mqttTester'
+     # MQTT_Topic_Execute = 'mqttTester'
      # ...
      name = "LenasPC"
 
      # optionally announce presence of client at server's topic-specific message channel
-     client.publish(MQTT_Topic, 'Hi there! My name is '+ name +' and I have subscribed to topic '+ MQTT_Topic+'.')
+     client.publish(MQTT_Topic_Execute, 'Hi there! My name is '+ name +' and I have subscribed to topic '+ MQTT_Topic_Execute+'.')
      # ...
 
      # start listening here
