@@ -793,9 +793,37 @@ def realize_scenario(
                # Please note, message broaker does not manage requests. Indeed, each machine requires a manager for efficient ressource allocation.
                with open(logDirectory+"/"+sender+"_stdout.txt", "wb") as out, open(logDirectory+"/"+sender+"_stderr.txt", "wb") as err:
                     # carry out current scenario
-                    p = subprocess.Popen("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
+                    p = subprocess.Popen(
+                         "docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
                     print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
                     client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')
+                    
+               # Subprozess ausführen und Ergebnisse sammeln
+               """ try:
+                    # carry out current scenario
+                    p = subprocess.Popen(
+                         f"docker-compose -f {logDirectory}/{sender}-docker-compose.yml up --remove-orphans",
+                         shell=True,
+                         stdout=subprocess.PIPE,  # stdout umleiten
+                         stderr=subprocess.PIPE   # stderr umleiten
+                    )
+                    stdout, stderr = p.communicate()  # Warte auf den Abschluss des Prozesses und erfasse die Ausgaben
+                    
+                    # Ergebnisse verarbeiten
+                    stdout_decoded = stdout.decode('utf-8')
+                    stderr_decoded = stderr.decode('utf-8')
+
+                    # MQTT-Nachrichten veröffentlichen
+                    client.publish(MQTT_Topic_Results, f"{hostName}: Standard Output:\n{stdout_decoded}")
+                    client.publish(MQTT_Topic_Results, f"{hostName}: Error Output:\n{stderr_decoded}")
+
+                    print(f"Message of {sender} has been triggered at {receiver} successfully!")
+
+               except Exception as e:
+                    error_message = f"{hostName}: Error while processing the request: {str(e)}"
+                    client.publish(MQTT_Topic_Results, error_message)
+                    print(error_message) """
+                                   
 
 
      # If new knowledgeBase needs to be published to docker's hub, when create or refine scenarios have been finalized:

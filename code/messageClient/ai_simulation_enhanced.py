@@ -31,6 +31,9 @@ sys.path.insert(0, '../experiments')
 # specify global variables, so that they are known (1) at messageClient start and (2) at function calls from external scripts
 global hostName, hostArch, logDirectory
 # hostName = os.name
+# hostname muss dynamisch auf die Nummer 
+# des PCs im Netzwerk zugewiesen werden oder wir gehen dann über die IP Adressen 
+# die mit dem MQTT CLient verbunden sind
 hostName = "LenasPC"
 hostArch = platform.machine()
 logDirectory = "C:/Users/lenag/OneDrive/Dokumente/AUni/Masterarbeit/AI-CPS-Masterarbeit-Lena/code/messageClient/logs" 
@@ -211,12 +214,14 @@ if __name__ == '__main__':
      # Kein Argument vorhanden oder Argument ist leer
          print("Kein Argument gefunden oder Argument ist leer.")
 
+     MQTT_Username = "user1"
+     MQTT_Password = "WhHe1NPfDBJ%"
 
      # specify client for messaging
      client = mqtt.Client()
      client.on_connect = on_connect
      client.on_message = on_message
-     client.username_pw_set(username="user1", password="password1")
+     client.username_pw_set(username=MQTT_Username, password=MQTT_Password)
 
  # Broker einkommentieren
      # MQTT_Broker = "test.mosquitto.org" # world wide network via public test server (communication can be seen by everyone)
@@ -239,14 +244,19 @@ if __name__ == '__main__':
      # MQTT_Broker = local_ip
 
      # oder
-     MQTT_Broker = "localhost"
+     # MQTT_Broker = "localhost"
+     Broker_Port = 1883 
+     
+     # DB
+     MQTT_Broker = "172.18.230.56"
 
      # Raspi zu hause
      # MQTT_Broker = "192.168.178.53"
 
      # establish connection of client and server
      # - Method 1 - connect via plain MQTT protocol
-     client.connect(MQTT_Broker, 1883, 60)
+     client.connect(MQTT_Broker, Broker_Port)
+     # client.connect(MQTT_Broker, Broker_Port, 60)
      # - Method 2 - connect via secure MQTT over TLS/SSL
      # TBD when required
      # - Method 3 - connect via MQTT over TLS/SSL with certificates
