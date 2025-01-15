@@ -16,12 +16,15 @@ def get_bases():
 
     # Alle Dateien und Ordner im Verzeichnis auflisten
     entries = os.listdir(image_folder_path)
+    entries = ["marcusgrum/" + s.lower() for s in entries]
 
-    # os.makedirs(output_folder, exist_ok=True)
+    # if you want to write the names into a file in case you want to use 
+    # the code from a device where the image folder does not exist prepare to
+    # read the bases one time
+    # with open(output_file, "w") as file:
+    #     for entry in entries:
+    #         file.write(entry + "\n")  # Jeder Eintrag in eine neue Zeile
 
-    # In Datei schreiben
-    with open(output_file, "w") as file:
-        for entry in entries:
-            file.write(entry + "\n")  # Jeder Eintrag in eine neue Zeile
+    # print(f"Filenames were written to {output_file}.")
 
-    print(f"Dateinamen wurden in {output_file} geschrieben.")
+    return entries

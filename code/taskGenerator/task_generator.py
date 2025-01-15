@@ -17,8 +17,10 @@ import os
 import random
 import get_bases
 
+# if you want to read bases from the bases.txt file, because you don´t have the images folder
+# use this method in task_generator instead of the method in get_bases
 def read_bases(bases_file):
-    # Datei mit den Dateinamen einlesen
+    # read file with the basenames
     with open(bases_file, "r") as file:
         file_entries = file.readlines()
             
@@ -27,7 +29,8 @@ def read_bases(bases_file):
     
     return file_entries
 
-def task_generator(number_of_tasks, MQTT_topic, sender, receiver, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%"):
+# apply und refine geht, create muss ich mir nochmal angucken
+def task_generator(number_of_tasks, MQTT_topic, sender, receiver, host, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
     scenarios = [
         "apply_annSolution",
         "create_annSolution",
@@ -37,46 +40,100 @@ def task_generator(number_of_tasks, MQTT_topic, sender, receiver, MQTT_Username=
         # "realize_annExperiment"
     ]
 
-    # run the code to get the bases in the dir
-    get_bases.get_bases()
+    # get the bases in the dir
+    allBases = get_bases.get_bases()
     
-    try:
-        all_bases = read_bases("./code/taskGenerator/bases.txt")
-        print("bases where found")
-    except FileNotFoundError:
-        print("The txt with the bases was not found")
-        
+    # clustering der bases
+    knowledgeBase = []
+    activationBase = []
+    codeBase = "marcusgrum/codebase_ai_core_for_image_classification"
+    learningBase = []
+    others = []
+
+    for base in allBases:
+        if "activationbase" in base:
+            activationBase.append(base)
+        elif "knowledgebase" in base:
+            if "transport_system" in base:
+                continue
+            knowledgeBase.append(base)
+        elif "learningbase" in base:
+            learningBase.append(base)
+        else:
+            others.append(base)
     
-    # bei manchen bases in manchen szenarien wird, wenn da nix rein kommen soll
-    # einfach ein '-' gesetzt
-    knowledgeBase = ["test"]
-    activationBase = ["test"]
-    codeBase= "marcusgrum/codebase_ai_core_for_image_classification"
-    learningBase = ["test"]
     # receiver = random.randint(0,4)
-    i = 1
+    
+    i = 0
+    tasks = []
+
+    # create n random task strings
     while i <= number_of_tasks:
-        random_scenario = random.choice(scenarios)
-        print(f"Zufälliger String: {random_scenario}")
         i+=1
 
+        scenario = random.choice(scenarios)
+
+        if scenario == "apply_annSolution":
+            task = f"mosquitto_pub " \
+                f"-h {host} " \
+                f"-p 1883 " \
+                f"-t \"{MQTT_topic}\" "\
+                f"-u {MQTT_Username} " \
+                f"-P {MQTT_Password} " \
+                f'-m "Please realize the following AI case: ' \
+                f"scenario={scenario}, " \
+                f"knowledge_base={random.choice(knowledgeBase)}, " \
+                f"activation_base={random.choice(activationBase)}, " \
+                f"code_base={codeBase}, " \
+                f"learning_base=-, " \
+                f"sender={sender}, " \
+                f"receiver={receiver}\" "
+        elif scenario == "create_annSolution":
+            task = f"mosquitto_pub " \
+                f"-h {host} " \
+                f"-p 1883 " \
+                f"-t \"{MQTT_topic}\" "\
+                f"-u {MQTT_Username} " \
+                f"-P {MQTT_Password} " \
+                f'-m "Please realize the following AI case: ' \
+                f"scenario={scenario}, " \
+                f"knowledge_base=-, " \
+                f"activation_base=-, " \
+                f"code_base={codeBase}, " \
+                f"learning_base={random.choice(learningBase)}, " \
+                f"sender={sender}, " \
+                f"receiver={receiver}\" "
+        elif scenario == "refine_annSolution":
+            task = f"mosquitto_pub " \
+                f"-h {host} " \
+                f"-p 1883 " \
+                f"-t \"{MQTT_topic}\" "\
+                f"-u {MQTT_Username} " \
+                f"-P {MQTT_Password} " \
+                f'-m "Please realize the following AI case: ' \
+                f"scenario={scenario}, " \
+                f"knowledge_base={random.choice(knowledgeBase)}, " \
+                f"activation_base=-, " \
+                f"code_base={codeBase}, " \
+                f"learning_base={random.choice(learningBase)}, " \
+                f"sender={sender}, " \
+                f"receiver={receiver}\" "
+
+        tasks.append(task)
+
+    # outputfile to store the generated tasks
+    output_file = "./code/taskGenerator/generated_tasks.txt"
+
+    # write in output file
+    with open(output_file, "w") as file:
+        for task in tasks:
+            file.write(task + "\n")  # Jeder Eintrag in eine neue Zeile
+
+    print(f"Tasks were stored in {output_file}.")
+
     # die letzten zeilen erst durch TaskManager generieren???
-    task = f"mosquitto_pub -t {MQTT_topic} " \
-       f"-u {MQTT_Username} " \
-       f"-P {MQTT_Password} " \
-       f'-m "Please realize the following AI case: ' \
-       f"scenario={scenarios[0]}, " \
-       f"knowledge_base={knowledgeBase[0]}, " \
-       f"activation_base={activationBase[0]}, " \
-       f"code_base={codeBase}, " \
-       f"learning_base={learningBase[0]}, " \
-       f"sender={sender}, " \
-       f"receiver={receiver}\" " \
-       f"-h mqttTester " \
-       f"-p 1883"
-    
-    print(task)
 
 
-task_generator(10, "test", "test", "test")
+# example to run the task generator
+task_generator(5, "mqttTester", "SenderA", "LenasPC", "localhost")
 
