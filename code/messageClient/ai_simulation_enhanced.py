@@ -36,7 +36,7 @@ global hostName, hostArch, logDirectory
 # die mit dem MQTT CLient verbunden sind
 hostName = "LenasPC"
 hostArch = platform.machine()
-logDirectory = "C:/Users/lenag/OneDrive/Dokumente/AUni/Masterarbeit/AI-CPS-Masterarbeit-Lena/code/messageClient/logs" 
+logDirectory = "./code/messageClient/logs" 
 try:
     subprocess.check_output('nvidia-smi')
     print('Nvidia GPU detected!')
@@ -72,6 +72,28 @@ def get_local_ip():
 # IP-Adresse abrufen
 local_ip = get_local_ip()
 print(f"Lokale IP-Adresse: {local_ip}")
+
+# get the latest broker ip of the broker which was started
+def get_broker_ip():
+    # Der aktuelle Ordner, in dem sich der ausführende Code befindet
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Gehe zum Überordner "code"
+    parent_dir = os.path.dirname(current_dir)
+
+    # Konstruktiere den Pfad zum Ordner "messageBroker"
+    broker_dir = os.path.join(parent_dir, "messageBroker")
+
+    # Der vollständige Pfad zur Datei "broker_ip_log.txt"
+    ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
+
+    try:
+        with open(ip_file, 'r', encoding='utf-8') as file:
+            broker_ip = file.read()
+            
+        return broker_ip
+    except FileNotFoundError:
+       print(f"File {ip_file} not found")
 
 def load_data_fromfile(path):
     """
@@ -245,10 +267,11 @@ if __name__ == '__main__':
 
      # oder
      # MQTT_Broker = "localhost"
+     MQTT_Broker = get_broker_ip()
      Broker_Port = 1883 
      
      # DB
-     MQTT_Broker = "172.18.230.56"
+     # MQTT_Broker = "172.18.230.56"
 
      # Raspi zu hause
      # MQTT_Broker = "192.168.178.53"
