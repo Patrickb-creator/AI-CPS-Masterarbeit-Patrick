@@ -7,7 +7,7 @@ import shutil
 import sys
 import datetime
 
-        # Logdatei und Konfiguration festlegen
+# Logdatei und Konfiguration festlegen
 broker_logfile = "mosquitto.log"
 logging.basicConfig(
     filename=broker_logfile,            # Name der Logdatei
@@ -17,7 +17,8 @@ logging.basicConfig(
     # stream=sys.stdout # you have to decide wich logging you want, in stdout or in logfile
 )
 
-broker_ip_log = "broker_ip_log.txt"
+broker_ip_log_path = os.path.dirname(os.path.abspath(__file__))
+broker_ip_log = os.path.join(broker_ip_log_path, "broker_ip_log.txt")
 
 def get_local_ip():
     # get the local hostname
