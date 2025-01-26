@@ -6,7 +6,8 @@ import os
 
 def get_bases():
     # Pfad zum Ordner der images
-    image_folder_path = "./images"
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    image_folder_path = os.path.join(current_dir, "..", "..", "images")
 
     # Ordnerpfad, in dem die Datei gespeichert werden soll
     # output_folder = "./taskGenerator"
@@ -14,10 +15,13 @@ def get_bases():
     # Dateiname mit vollständigem Pfad
     output_file = "./code/taskGenerator/bases.txt"
 
-    # Alle Dateien und Ordner im Verzeichnis auflisten
-    entries = os.listdir(image_folder_path)
-    entries = ["marcusgrum/" + s.lower() for s in entries]
-
+    try:
+        entries = os.listdir(image_folder_path)
+        entries = ["marcusgrum/" + s.lower() for s in entries]
+    except FileNotFoundError:
+        print(f"Der Ordner '{image_folder_path}' konnte nicht gefunden werden.")
+        return []
+    
     # if you want to write the names into a file in case you want to use 
     # the code from a device where the image folder does not exist prepare to
     # read the bases one time
