@@ -75,6 +75,19 @@ def task_generator(number_of_tasks, MQTT_topic, sender, receiver, client, host, 
     learning_base = [base for base in all_bases if "learningbase" in base]
     code_base = "marcusgrum/codebase_ai_core_for_image_classification"
 
+#  for _ in range(number_of_tasks):
+#         scenario = random.choice(scenarios)
+#         task = {
+#             "scenario": scenario,
+#             "knowledge_base": random.choice(knowledge_base) if scenario != "create_annSolution" else "-",
+#             "activation_base": random.choice(activation_base) if scenario != "create_annSolution" else "-",
+#             "learning_base": random.choice(learning_base) if scenario != "apply_annSolution" else "-",
+#             "code_base": code_base,
+#             "sender": "{SENDER}",  # Platzhalter
+#             "receiver": "{RECEIVER}",  # Platzhalter
+#         }
+#         tasks.append(task)
+
     tasks = []
     for _ in range(number_of_tasks):
         scenario = random.choice(scenarios)
@@ -90,9 +103,9 @@ def task_generator(number_of_tasks, MQTT_topic, sender, receiver, client, host, 
                 f"knowledge_base={random.choice(knowledge_base)}, " \
                 f"activation_base={random.choice(activation_base)}, " \
                 f"code_base={code_base}, " \
-                f"learning_base=-, " \
-                f"sender={sender}, " \
-                f"receiver={receiver}\" "
+                f"learning_base=-, " #\
+                # f"sender={sender}, " \
+                # f"receiver={receiver}\" "
         elif scenario == "create_annSolution":
             task = f"mosquitto_pub " \
                 f"-h {host} " \
@@ -105,9 +118,9 @@ def task_generator(number_of_tasks, MQTT_topic, sender, receiver, client, host, 
                 f"knowledge_base=-, " \
                 f"activation_base=-, " \
                 f"code_base={code_base}, " \
-                f"learning_base={random.choice(learning_base)}, " \
-                f"sender={sender}, " \
-                f"receiver={receiver}\" "
+                f"learning_base={random.choice(learning_base)}, " #\
+                # f"sender={sender}, " \
+                # f"receiver={receiver}\" "
         elif scenario == "refine_annSolution":
             task = f"mosquitto_pub " \
                 f"-h {host} " \
@@ -120,9 +133,9 @@ def task_generator(number_of_tasks, MQTT_topic, sender, receiver, client, host, 
                 f"knowledge_base={random.choice(knowledge_base)}, " \
                 f"activation_base=-, " \
                 f"code_base={code_base}, " \
-                f"learning_base={random.choice(learning_base)}, " \
-                f"sender={sender}, " \
-                f"receiver={receiver}\" "
+                f"learning_base={random.choice(learning_base)}, " # \
+                # "sender={sender}, " \
+                # f"receiver={receiver}\" "
         tasks.append(task)
 
     # store the generated tasks to an output file
