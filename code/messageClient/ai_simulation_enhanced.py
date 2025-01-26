@@ -37,6 +37,7 @@ global hostName, hostArch, logDirectory
 client_id = "LenasPC"
 hostArch = platform.machine()
 logDirectory = "./code/messageClient/logs" 
+
 try:
     subprocess.check_output('nvidia-smi')
     print('Nvidia GPU detected!')
@@ -56,6 +57,7 @@ if hostArch == 'amd_64_gpu':
 
 MQTT_Topic_Execute = 'mqttTester'
 MQTT_Topic_Results = 'mqttTester/results'
+MQTT_Tasks = "tasks/#"
 
 # lokale IP Adresse des Geräts herausfinden, damit man es nicht immer selber im Code festlegen muss
 def get_local_ip():
@@ -152,6 +154,7 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(MQTT_Topic_Execute, qos = 0)  # channel to deal with CoNM
     client.subscribe(MQTT_Topic_Results, qos = 0)
     client.subscribe("ping/request")  # Subscribe zum Empfangen von Pings
+    client.subscribe("tasks/#")
     client.message_callback_add("ping/request", on_ping_request)  # Callback hinzufügen
     # ...
 
@@ -184,7 +187,11 @@ def on_message(client, userdata, msg):
     message = msg.payload.decode()
     topic = msg.topic
     print(msg.topic + " " + str(message))
+
     scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver = unroll_message(str(message))
+
+    if topic.startswith("tasks/"):
+        print(f"Neue Aufgabe erhalten: {message}")
 
     if(receiver == client_id):
         # realize scenario, such as create_annSolution / apply_annSolution / refine_annSolution / publish_annSolution #/ realize_annExperiment
@@ -220,7 +227,7 @@ def unroll_message(message):
     code_base = (message.partition("code_base=")[2]).partition(", learning_base=")[0]
     learning_base = (message.partition("learning_base=")[2]).partition(", sender=")[0]
     sender = (message.partition("sender=")[2]).partition(", receiver=")[0]
-    receiver = (message.partition("receiver=")[2]).partition(".")[0]
+    receiver = (message.partition("receiver=")[2]).partition(".")[0].rstrip('"')
 
     return scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver
 
