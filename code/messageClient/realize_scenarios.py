@@ -6,6 +6,7 @@ import csv
 import os
 import platform
 import numpy
+from datetime import datetime
 
 
 def build_docker_file_for_publication_at_dockerhub(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory):
@@ -734,8 +735,23 @@ def unroll_sensorValuesFromScenario(message):
      
      return scenario, cps1_conveyor_workpieceSensorLeft, cps1_conveyor_workpieceSensorCenter, cps1_conveyor_workpieceSensorRight, cps2_conveyor_workpieceSensorLeft, cps2_conveyor_workpieceSensorCenter, cps2_conveyor_workpieceSensorRight
 
+# clear log directory when processing many tasks at once
+def clear_log_directory(log_directory):
+    """
+    clears log before new tasks are executed
+    """
+    if not os.path.exists(log_directory):
+        os.makedirs(log_directory)  # create dir if it does´nt exist yet
+
+    # delete all files in the logdirectory
+    for filename in os.listdir(log_directory):
+        file_path = os.path.join(log_directory, filename)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+    print(f"Log-Verzeichnis {log_directory} wurde geleert.")
+
 def realize_scenario(
-          logDirectory, 
+          log_directory, 
           MQTT_Topic_Results,
           scenario, 
           knowledge_base, 
@@ -756,24 +772,24 @@ def realize_scenario(
      # build docker-compose file based on message
      # for standard situations (experiment01-04)
      if (scenario == 'apply_annSolution'):
-          build_docker_compose_file_for_apply_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory)
+          build_docker_compose_file_for_apply_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, log_directory)
      if (scenario == 'create_annSolution'):
-          build_docker_compose_file_for_create_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory)
+          build_docker_compose_file_for_create_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, log_directory)
      if (scenario == 'refine_annSolution'):
-          build_docker_compose_file_for_refine_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory)
+          build_docker_compose_file_for_refine_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, log_directory)
      if (scenario == 'wire_annSolution'):
-          build_docker_compose_file_for_wire_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory)
+          build_docker_compose_file_for_wire_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, log_directory)
      if (scenario == 'evaluate_annSolution'):
-          build_docker_compose_file_for_evaluate_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory)
+          build_docker_compose_file_for_evaluate_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, log_directory)
 
      # for experiment05
      if (scenario == 'apply_annSolution_for_imageClassification'):
-          build_docker_compose_file_for_apply_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory)
+          build_docker_compose_file_for_apply_annSolution(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, log_directory)
      if (scenario == 'apply_annSolution_for_transportClassification'):
-          build_docker_compose_file_for_apply_annSolution_of_transportClassification(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver,hostArch, logDirectory)
+          build_docker_compose_file_for_apply_annSolution_of_transportClassification(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver,hostArch, log_directory)
      if ('manual_sensorValueUpdate' in scenario):
           scenario, cps1_conveyor_workpieceSensorLeft, cps1_conveyor_workpieceSensorCenter, cps1_conveyor_workpieceSensorRight, cps2_conveyor_workpieceSensorLeft, cps2_conveyor_workpieceSensorCenter, cps2_conveyor_workpieceSensorRight = unroll_sensorValuesFromScenario(scenario)
-          build_docker_compose_file_for_manual_sensorValueUpdate(sender, cps1_conveyor_workpieceSensorLeft, cps1_conveyor_workpieceSensorCenter, cps1_conveyor_workpieceSensorRight, cps2_conveyor_workpieceSensorLeft, cps2_conveyor_workpieceSensorCenter, cps2_conveyor_workpieceSensorRight, hostArch, logDirectory)
+          build_docker_compose_file_for_manual_sensorValueUpdate(sender, cps1_conveyor_workpieceSensorLeft, cps1_conveyor_workpieceSensorCenter, cps1_conveyor_workpieceSensorRight, cps2_conveyor_workpieceSensorLeft, cps2_conveyor_workpieceSensorCenter, cps2_conveyor_workpieceSensorRight, hostArch, log_directory)
 
      # realize instructions from messages by running docker-compose file created at machine-specific working directory
      if (scenario == 'apply_annSolution') or (scenario == 'create_annSolution') or (scenario == 'refine_annSolution') or (scenario == 'wire_annSolution') or (scenario == 'evaluate_annSolution'):
@@ -783,7 +799,7 @@ def realize_scenario(
                # Remark: By this variant, parallel requests at the same machine are realized sequentially, which is managed by message broaker (next request is delivered when previous request has been finished).
                #         So, requests are realized one after the other.
                # subprocess.call("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
-               subprocess.run("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
+               subprocess.run("docker-compose -f "+log_directory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
                print('Message of ' + sender + ' has been processed at ' + receiver + ' successfully!')
                client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')
 
@@ -791,40 +807,29 @@ def realize_scenario(
                # b) by subprocess.Popen()
                # Remark: By this variant, parallel requests at the same machine are realized in parallel. Hence, individual stdout and stderr have been created so that CLI output is separated correctly.
                # Please note, message broaker does not manage requests. Indeed, each machine requires a manager for efficient ressource allocation.
-               with open(logDirectory+"/"+sender+"_stdout.txt", "wb") as out, open(logDirectory+"/"+sender+"_stderr.txt", "wb") as err:
-                    # carry out current scenario
-                    p = subprocess.Popen(
-                         "docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
-                    print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
-                    client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')
-                    
-               # Subprozess ausführen und Ergebnisse sammeln
-               """ try:
-                    # carry out current scenario
-                    p = subprocess.Popen(
-                         f"docker-compose -f {logDirectory}/{sender}-docker-compose.yml up --remove-orphans",
-                         shell=True,
-                         stdout=subprocess.PIPE,  # stdout umleiten
-                         stderr=subprocess.PIPE   # stderr umleiten
-                    )
-                    stdout, stderr = p.communicate()  # Warte auf den Abschluss des Prozesses und erfasse die Ausgaben
-                    
-                    # Ergebnisse verarbeiten
-                    stdout_decoded = stdout.decode('utf-8')
-                    stderr_decoded = stderr.decode('utf-8')
+               try:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    with open(log_directory+"/"+sender+ "_" + timestamp + "_stdout.txt", "wb") as out, \
+                         open(log_directory+"/"+sender+ "_" + timestamp + "_stderr.txt", "wb") as err:
 
-                    # MQTT-Nachrichten veröffentlichen
-                    client.publish(MQTT_Topic_Results, f"{hostName}: Standard Output:\n{stdout_decoded}")
-                    client.publish(MQTT_Topic_Results, f"{hostName}: Error Output:\n{stderr_decoded}")
+                         # carry out current scenario
+                         p = subprocess.Popen(
+                              "docker-compose -f "+ log_directory + "/" + sender + "-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
+                         print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
 
-                    print(f"Message of {sender} has been triggered at {receiver} successfully!")
+                         stdout, stderr = p.communicate()
 
+                         if stdout:
+                              with open(f"{log_directory}/{sender}_stdout.txt", "a") as f:
+                                   f.write(stdout.decode('utf-8'))
+                         if stderr:
+                              with open(f"{log_directory}/{sender}_stderr.txt", "a") as f:
+                                   f.write(stderr.decode('utf-8'))
+                    client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')                                                   
                except Exception as e:
-                    error_message = f"{hostName}: Error while processing the request: {str(e)}"
-                    client.publish(MQTT_Topic_Results, error_message)
-                    print(error_message) """
-                                   
-
+                    print(f"Fehler beim Ausführen des Szenarios: {str(e)}")
+                    client.publish(MQTT_Topic_Results, hostName + ': This is an error! I could not process the ann request!')                                                   
+                    
 
      # If new knowledgeBase needs to be published to docker's hub, when create or refine scenarios have been finalized:
      if (scenario == 'publish_annSolution'):
@@ -835,15 +840,15 @@ def realize_scenario(
                # 2. copy ANN to dockers current build context folder (for preparing publication to docker's hub)
                subprocess.run("docker run --rm -v $PWD/logs:/host -v ai_system:/ai_system -w /ai_system busybox cp /ai_system/" + sender+"/knowledgeBase/currentSolution.h5 /host/"+sender+"_currentSolution.h5", shell=True)
                # 3. build ANN-based container for relevant architectures in current build context folder and publish at docker's hub
-               subprocess.run("docker buildx build --platform linux/arm/v7,linux/arm64/v8,linux/amd64 --file "+logDirectory+"/"+sender+"-docker-file --tag marcusgrum/knowledgebase_"+sender+":latest --push  "+logDirectory+"/", shell=True)
+               subprocess.run("docker buildx build --platform linux/arm/v7,linux/arm64/v8,linux/amd64 --file "+log_directory+"/"+sender+"-docker-file --tag marcusgrum/knowledgebase_"+sender+":latest --push  "+log_directory+"/", shell=True)
 
           if (sub_process_method == "parallel"):
                # 2. copy ANN to dockers current build context folder (for preparing publication to docker's hub)
-               with open(logDirectory+"/"+sender+"_stdout.txt", "wb") as out, open(logDirectory+"/"+sender+"_stderr.txt", "wb") as err:
+               with open(log_directory+"/"+sender+"_stdout.txt", "wb") as out, open(log_directory+"/"+sender+"_stderr.txt", "wb") as err:
                     subprocess.Popen("docker run --rm -v $PWD/logs:/host -v ai_system:/ai_system -w /ai_system busybox cp /ai_system/"+sender+"/knowledgeBase/currentSolution.h5 /host/"+sender+"_currentSolution.h5", shell=True, stdout=out, stderr=err)
                # 3. build ANN-based container for relevant architectures in current build context folder and publish at docker's hub
-               with open(logDirectory+"/"+sender+"_stdout.txt", "wb") as out, open(logDirectory+"/"+sender+"_stderr.txt", "wb") as err:
-                    subprocess.Popen("docker buildx build --platform linux/arm/v7,linux/arm64/v8,linux/amd64 --file "+logDirectory+"/"+sender+"-docker-file --tag marcusgrum/knowledgebase_"+sender+":latest --push  "+logDirectory+"/", shell=True, stdout=out, stderr=err)
+               with open(log_directory+"/"+sender+"_stdout.txt", "wb") as out, open(log_directory+"/"+sender+"_stderr.txt", "wb") as err:
+                    subprocess.Popen("docker buildx build --platform linux/arm/v7,linux/arm64/v8,linux/amd64 --file "+log_directory+"/"+sender+"-docker-file --tag marcusgrum/knowledgebase_"+sender+":latest --push  "+log_directory+"/", shell=True, stdout=out, stderr=err)
 
      if (scenario == 'realize_annExperiment'):
           # comment out to keep current results and avoid accidental activation (unintended overwriting containers)
@@ -860,9 +865,9 @@ def realize_scenario(
                # b) by subprocess.Popen()
                # Remark: By this variant, parallel requests at the same machine are realized in parallel. Hence, individual stdout and stderr have been created so that CLI output is separated correctly.
                # Please note, message broaker does not manage requests. Indeed, each machine requires a manager for efficient ressource allocation.
-               with open(logDirectory+"/"+sender+"_stdout.txt", "wb") as out, open(logDirectory+"/"+sender+"_stderr.txt", "wb") as err:
+               with open(log_directory+"/"+sender+"_stdout.txt", "wb") as out, open(log_directory+"/"+sender+"_stderr.txt", "wb") as err:
                     # carry out current scenario
-                    p = subprocess.Popen("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
+                    p = subprocess.Popen("docker-compose -f "+log_directory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
                     print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
                     # wait for finalization at experiment 5
                     p.wait(timeout=None)
