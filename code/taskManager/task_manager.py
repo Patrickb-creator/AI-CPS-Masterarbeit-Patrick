@@ -68,7 +68,7 @@ def find_receiver(task):
    match = re.search(r'receiver=([^\s,]+)', task)
    # Wenn ein Treffer gefunden wird, den receiver ausgeben
    if match:
-         receiver = match.group(1)
+         receiver = match.group(1).rstrip('"')
          return receiver
    else:
          print("Kein Receiver gefunden")
@@ -78,7 +78,7 @@ def find_receiver(task):
 # the ❤️ of the distribution!!!!!
 def distribute_tasks(client):
    global task_list
-   
+
    while not stop_event.is_set():
       if not connected_clients:
          print("No connected clients. Waiting...")
