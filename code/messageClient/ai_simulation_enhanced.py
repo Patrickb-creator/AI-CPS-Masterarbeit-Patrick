@@ -195,7 +195,12 @@ def on_message(client, userdata, msg):
 
     if topic.startswith(f"tasks/{client_id}"):
         print(f"{client_id}: New task received: {message}")
-        task_queue.put((topic, message))
+
+        # split message by newline and enqueue each task separately
+        task_list = message.strip().split("\n")
+        for task in task_list:
+            if task.strip():  # Check if task is not empty
+                task_queue.put((topic, task))
 
 def task_worker():
     while True:
