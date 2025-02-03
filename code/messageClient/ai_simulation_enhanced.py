@@ -46,8 +46,11 @@ pc_name = "LenasPC"
 hostArch = platform.machine()
 
 # Log directory for task results
-logDirectory =  "./code/messageClient/task_logs" 
-os.makedirs(logDirectory, exist_ok=True) 
+project_root = os.getcwd()  # Hauptverzeichnis
+logDirectory = os.path.join(project_root, "code/messageClient/task_logs")
+if not os.path.exists(logDirectory):
+    os.makedirs(logDirectory, exist_ok=True)
+print(f"Logs are saved here: {logDirectory}")
 
 try:
     subprocess.check_output('nvidia-smi')
