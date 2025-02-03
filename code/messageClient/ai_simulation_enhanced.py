@@ -27,6 +27,8 @@ import threading
 from queue import Queue
 from datetime import datetime
 import sys
+from zeroconf import ServiceBrowser, Zeroconf, ServiceListener
+import mqtt_broker_listener as broker_listener
 
 # import experiments
 import sys
@@ -197,6 +199,7 @@ def on_message(client, userdata, msg):
         print(f"{client_id}: New task received: {message}")
 
         # split message by newline and enqueue each task separately
+        # TODO: CLEAR TASK LOG BEFOREHAND
         task_list = message.strip().split("\n")
         for task in task_list:
             if task.strip():  # Check if task is not empty
@@ -330,15 +333,16 @@ if __name__ == '__main__':
     # Set Last Will Message
     client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=True)
 
-# Broker einkommentieren
-    # MQTT_Broker = "test.mosquitto.org" # world wide network via public test server (communication can be seen by everyone)
-    # MQTT_Broker = "broker.hivemq.com" # world wide network via public test server (communication can be seen by everyone)
-    # MQTT_Broker = "iot.eclipse.org"   # world wide network via public test server (communication can be seen by everyone)
-    # communication in local network (start server with /usr/local/sbin/mosquitto -c /usr/local/etc/mosquitto/mosquitto.conf )
+    broker_info = broker_listener.discover_broker()
     
-    # set broker IP
-    MQTT_Broker = get_broker_ip()
-    Broker_Port = 1883 
+    if broker_info:
+        MQTT_Broker, Broker_Port = broker_info
+        print(f"Using broker: {MQTT_Broker}:{Broker_Port}")
+    else:
+        print("No MQTT broker discovered, using fallback IP.")
+        MQTT_Broker = get_broker_ip() or "localhost"
+        Broker_Port = 1883
+
     # establish connection of client and server
     # - Method 1 - connect via plain MQTT protocol
     client.connect(MQTT_Broker, Broker_Port)
