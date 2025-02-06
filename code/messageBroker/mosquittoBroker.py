@@ -28,7 +28,7 @@ def write_broker_ip(local_ip):
     formatted_now = now.strftime("%Y-%m-%d %H:%M:%S")
     
     with open(broker_ip_log, "w") as file:
-        file.write(f"{formatted_now} - Broker IP: {local_ip}")
+        file.write(f"{local_ip}")
 
 def register_mdns_service(local_ip):
     """Register the MQTT broker over mDNS (Zeroconf)."""

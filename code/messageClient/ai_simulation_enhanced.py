@@ -336,6 +336,7 @@ if __name__ == '__main__':
     # Set Last Will Message
     client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=True)
 
+    # get the broker ip from the mDNS
     broker_info = broker_listener.discover_broker()
     
     if broker_info:
