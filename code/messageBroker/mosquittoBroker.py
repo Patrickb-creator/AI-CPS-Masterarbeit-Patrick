@@ -7,11 +7,21 @@ from zeroconf import ServiceInfo, Zeroconf
 
 # log file and config settings
 broker_logfile = "mosquitto.log"
+# logging.basicConfig(
+#     filename=broker_logfile,  # name of the log file
+#     level=logging.INFO,  # log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+#     format="%(asctime)s - %(levelname)s - %(message)s",  # log format
+#     filemode="w",  # mode: "w" for overwrite, "a" for append
+# )
+
+# Logging einrichten, um sowohl in der Konsole als auch in einer Logdatei zu loggen
 logging.basicConfig(
-    filename=broker_logfile,  # name of the log file
-    level=logging.INFO,  # log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format="%(asctime)s - %(levelname)s - %(message)s",  # log format
-    filemode="w",  # mode: "w" for overwrite, "a" for append
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # Loggt in die Konsole
+        logging.FileHandler("broker_logs.log", mode="a")  # Loggt in die Datei "broker_logs.log"
+    ]
 )
 
 broker_ip_log_path = os.path.dirname(os.path.abspath(__file__))
@@ -65,10 +75,10 @@ def start_mqtt_broker_and_log():
         print(f"Configuration file path: {config_path}")
 
         process = subprocess.Popen(
-            ["mosquitto", "-c", config_path],
+            ["mosquitto", "-c", config_path, "-v"],  # -v für detailliertes Logging
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            # text=True,
         )
 
         print("Log file created. Broker is running. Press CTRL+C to terminate.")
@@ -79,11 +89,17 @@ def start_mqtt_broker_and_log():
             if output == "" and process.poll() is not None and error_output == "":
                 break
             if output:
-                print(output.strip())
-                logging.info(output.strip())
+                # print(output.strip())
+                # logging.info(output.strip())
+                output_str = output.strip().decode("utf-8")  # Entschlüsseln und strippen
+                print(output_str)  # Zeige die Ausgabe in der Konsole
+                logging.info(output_str)  # Logge es in der Logdatei
             if error_output:
-                print(error_output.strip())
-                logging.error(error_output.strip())
+                # print(error_output.strip())
+                # logging.error(error_output.strip())
+                error_output_str = error_output.strip().decode("utf-8")
+                print(error_output_str)  # Zeige Fehler in der Konsole
+                logging.error(error_output_str)  # Logge Fehler in der Logdatei
     except FileNotFoundError:
         logging.error("Mosquitto not found. Is it installed and in PATH?")
         print("Error: Mosquitto not found. Please make sure it is installed.")
