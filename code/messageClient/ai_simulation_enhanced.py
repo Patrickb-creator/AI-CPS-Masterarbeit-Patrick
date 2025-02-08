@@ -306,7 +306,7 @@ def unroll_message(message):
 if __name__ == '__main__':
     """
     This function initiates communication client
-    and manages the corresponding AI reguests.
+    and manages the corresponding AI requests.
     """
     # adding freeze_support() ensures smooth execution when packaged for distribution 
     # while using multiprocessing features

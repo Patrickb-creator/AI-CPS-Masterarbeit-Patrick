@@ -7,6 +7,60 @@ import os
 import platform
 import numpy
 from datetime import datetime
+from codecarbon import EmissionsTracker
+
+# change power scheme in windows
+def set_power_scheme(scheme_guid):
+    os.system(f"powercfg /setactive {scheme_guid}")
+
+# change power scheme in linux
+def set_cpu_governor(governor="powersave"):
+    """set CPU-Governor for DVFS"""
+    try:
+        for cpu in range(os.cpu_count()):
+            governor_path = f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_governor"
+            with open(governor_path, "w") as f:
+                f.write(governor)
+            print(f"set CPU {cpu} to '{governor}'.")
+    except PermissionError:
+        print("Permissions denied. Please run file as root.")
+        
+# for a greener client lets activate power saving mode, but first check which os we use
+def set_os_specific_power_scheme(scheme="balanced"):
+     os_name = platform.system() # get os
+     if os_name == "Windows":
+          print("OS: Windows")
+          if scheme == "balanced":
+               set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
+               print("Set power scheme to balanced.")
+          elif scheme == "save":
+               set_power_scheme("a1841308-3541-4fab-bc81-f71556f20b4a")
+               print("Set power scheme to saving.")
+          elif scheme == "max":
+               set_power_scheme("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c")
+               print("Set power scheme to max power.")
+          else:
+               print("please provide a right string e.g. balanced, save or max.")
+     elif os_name == "Linux":
+         print("OS: Linux")
+         set_cpu_governor()
+         print("Set power scheme to saving.")
+     elif os_name == "Darwin":
+         print("OS: macOS")
+     else:
+         print(f"Unbekanntes Betriebssystem: {os_name}")
+
+# change power scheme in linux
+def set_cpu_governor(governor="powersave"):
+    """set CPU-Governor for DVFS"""
+    try:
+        for cpu in range(os.cpu_count()):
+            governor_path = f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_governor"
+            with open(governor_path, "w") as f:
+                f.write(governor)
+            print(f"set CPU {cpu} to '{governor}'.")
+    except PermissionError:
+        print("Permissions denied. Please run file as root.")
 
 
 def build_docker_file_for_publication_at_dockerhub(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory):
@@ -750,6 +804,61 @@ def clear_log_directory(log_directory):
             os.remove(file_path)
     print(f"Log-Verzeichnis {log_directory} wurde geleert.")
 
+def run_docker_compose(sender, receiver, log_directory, log_to_file=True):
+     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # paths to log files
+     stdout_file = f"{log_directory}/{sender}_{timestamp}_stdout.txt"
+     stderr_file = f"{log_directory}/{sender}_{timestamp}_stderr.txt"
+
+    # creation of log files, if user wants to have them
+     if log_to_file:
+          stdout_stream = open(stdout_file, "wb")
+          stderr_stream = open(stderr_file, "wb")
+     else:
+          stdout_stream = subprocess.PIPE
+          stderr_stream = subprocess.PIPE
+
+     # codecarbon just for testing
+     tracker = EmissionsTracker(measure_power_secs=1, allow_multiple_runs=True)  # CodeCarbon Tracker für Stromverbrauchsmessung
+
+     try:
+          tracker.start()  # Messung starten
+          # Docker Compose Prozess starten
+          p = subprocess.Popen(
+               f"docker-compose -f {log_directory}/{sender}-docker-compose.yml up --remove-orphans",
+               shell=True, stdout=stdout_stream, stderr=stderr_stream
+               )
+        
+          print(f'Message of {sender} has been triggered at {receiver} successfully!')
+        
+          # catch the output after it´s done
+          stdout, stderr = p.communicate()
+     
+          # show results directly in console when file logging is deactivated
+          if not log_to_file:
+               if stdout:
+                    print(stdout.decode('utf-8'))
+               if stderr:
+                    print(stderr.decode('utf-8'))
+          else:
+               if stdout:
+                    with open(stdout_file, "ab") as f:
+                         f.write(stdout)
+               if stderr:
+                    with open(stderr_file, "ab") as f:
+                         f.write(stderr)
+          set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
+          print("Set power scheme to balanced.")
+     finally:
+          emissions = tracker.stop()  # Messung beenden
+          # Ausgabe der Emissionsdaten
+          print(emissions)
+          
+          if log_to_file:
+                    stdout_stream.close()
+                    stderr_stream.close()
+
 def realize_scenario(
           log_directory, 
           MQTT_Topic_Results,
@@ -768,7 +877,7 @@ def realize_scenario(
      This function realizes scenarios, such as from communication client
      and manages the corresponding AI reguests.
      """
-
+     clear_log_directory(log_directory)
      # build docker-compose file based on message
      # for standard situations (experiment01-04)
      if (scenario == 'apply_annSolution'):
@@ -808,23 +917,24 @@ def realize_scenario(
                # Remark: By this variant, parallel requests at the same machine are realized in parallel. Hence, individual stdout and stderr have been created so that CLI output is separated correctly.
                # Please note, message broaker does not manage requests. Indeed, each machine requires a manager for efficient ressource allocation.
                try:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    with open(log_directory+"/"+sender+ "_" + timestamp + "_stdout.txt", "wb") as out, \
-                         open(log_directory+"/"+sender+ "_" + timestamp + "_stderr.txt", "wb") as err:
+                    run_docker_compose(sender, receiver, log_directory, log_to_file=False)
+                    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    # with open(log_directory+"/"+sender+ "_" + timestamp + "_stdout.txt", "wb") as out, \
+                    #      open(log_directory+"/"+sender+ "_" + timestamp + "_stderr.txt", "wb") as err:
 
-                         # carry out current scenario
-                         p = subprocess.Popen(
-                              "docker-compose -f "+ log_directory + "/" + sender + "-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
-                         print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
+                    #      # carry out current scenario
+                    #      p = subprocess.Popen(
+                    #           "docker-compose -f "+ log_directory + "/" + sender + "-docker-compose.yml up --remove-orphans", shell=True, stdout=out, stderr=err)
+                    #      print('Message of ' + sender + ' has been triggered at ' + receiver + ' successfully!')
 
-                         stdout, stderr = p.communicate()
+                    #      stdout, stderr = p.communicate()
 
-                         if stdout:
-                              with open(f"{log_directory}/{sender}_stdout.txt", "a") as f:
-                                   f.write(stdout.decode('utf-8'))
-                         if stderr:
-                              with open(f"{log_directory}/{sender}_stderr.txt", "a") as f:
-                                   f.write(stderr.decode('utf-8'))
+                    #      if stdout:
+                    #           with open(f"{log_directory}/{sender}_stdout.txt", "a") as f:
+                    #                f.write(stdout.decode('utf-8'))
+                    #      if stderr:
+                    #           with open(f"{log_directory}/{sender}_stderr.txt", "a") as f:
+                    #                f.write(stderr.decode('utf-8'))
                     client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')                                                   
                except Exception as e:
                     print(f"Fehler beim Ausführen des Szenarios: {str(e)}")
