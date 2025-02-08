@@ -72,6 +72,10 @@ def start_mqtt_broker_and_log():
         
         # Determine the configuration file path and start the broker
         config_path = os.path.join(os.path.dirname(__file__), "mosquitto.conf")
+        
+        if not os.path.exists(config_path):
+            logging.error(f"Configuration file not found: {config_path}")
+            return
         print(f"Configuration file path: {config_path}")
 
         process = subprocess.Popen(
