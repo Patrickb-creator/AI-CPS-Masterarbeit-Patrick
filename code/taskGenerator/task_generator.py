@@ -59,7 +59,6 @@ def get_broker_ip():
 def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
 
-# Aufgaben-Generator-Funktion
 def task_generator(number_of_tasks, MQTT_topic, sender, receiver, client, host, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
     scenarios = [
         "apply_annSolution",
@@ -67,8 +66,11 @@ def task_generator(number_of_tasks, MQTT_topic, sender, receiver, client, host, 
         "refine_annSolution",
     ]
 
-    # Get bases from the directory
+    # fet bases from the directory
     all_bases = get_bases.get_bases()
+
+    # filter out specific knowledge bases
+    excluded_bases = ["knowledgeBase_cps1_transport_system_01", "knowledgeBase_cps2_transport_system_01"]
 
     knowledge_base = [base for base in all_bases if "knowledgebase" in base]
     activation_base = [base for base in all_bases if "activationbase" in base]
