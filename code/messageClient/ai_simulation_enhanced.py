@@ -334,7 +334,7 @@ if __name__ == '__main__':
     print(f"This is the client with id {client_id}.")
 
     # Set Last Will Message
-    client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=True)
+    client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=False)
 
     # get the broker ip from the mDNS
     broker_info = broker_listener.discover_broker()
@@ -378,14 +378,16 @@ if __name__ == '__main__':
     try:
         client.loop_forever()
     except KeyboardInterrupt:
-        client.loop_stop()
         print("Shutting down...")
+    finally:
+        print("Cleaning up before exit...")
+        client.publish(f"status/{client_id}", "Disconnected", qos=1, retain=False)
         client.disconnect()
         print("Client disconnected.")
-        
+    
         task_queue.put((None, "STOP"))
         if 'task_worker_thread' in locals() and task_worker_thread.is_alive():
             task_worker_thread.join(timeout=5)
-
-    print("Thread joined. Exiting now.")
-    sys.exit(0)
+    
+        print("Thread joined. Exiting now.")
+        sys.exit(0)

@@ -181,7 +181,6 @@ def on_message(client, userdata, msg):
          connected_clients.discard(client_name)
       elif "Connected" in message:
          connected_clients.add(client_name)
-
    # check for ping answers
    elif topic.startswith("ping/response/"):
       client_name = topic.split("/")[-1]

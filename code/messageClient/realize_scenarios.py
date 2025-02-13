@@ -14,8 +14,26 @@ def set_power_scheme(scheme_guid):
     os.system(f"powercfg /setactive {scheme_guid}")
 
 # change power scheme in linux
-def set_cpu_governor(governor="powersave"):
+def set_cpu_governor(governor="conservative"):
     """set CPU-Governor for DVFS"""
+# performance – Maximale Leistung, keine Rücksicht auf Stromverbrauch
+# powersave – Energiesparmodus, begrenzt die CPU-Frequenz
+# ondemand – Passt die Frequenz dynamisch an die Last an -> das ist der Standard unter Linux
+# conservative – Wie ondemand, aber langsamer und energiesparender
+# userspace ist auch noch available
+# schedutil – Nutzt den Linux-Scheduler zur Steuerung der Frequenz
+# Wenn du energieeffizient arbeiten möchtest, hängt die Wahl zwischen conservative und powersave von deinem Anwendungsfall ab:
+# 🔋 powersave
+# ✅ Maximale Energieeinsparung
+# ✅ Reduziert die CPU-Frequenz stark (meist auf das Minimum)
+# ❌ Kann Leistung stark einschränken, langsameres Arbeiten möglich
+# 📌 Ideal für: Maximale Akkulaufzeit, geringe Last (Surfen, Texte schreiben, Videos schauen)
+
+# ⚖️ conservative
+# ✅ Ähnlich wie ondemand, aber weniger aggressiv beim Hochskalieren
+# ✅ Erhöht die Frequenz nur langsam und nur, wenn wirklich nötig
+# ✅ Bessere Balance zwischen Stromsparen und Leistung als powersave
+# 📌 Ideal für: Rechenaufgaben, die Energieeffizienz erfordern (leichte CPU-Last, Skripte, leichte Bildbearbeitung, Coding)
     try:
         for cpu in range(os.cpu_count()):
             governor_path = f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_governor"
@@ -44,7 +62,7 @@ def set_os_specific_power_scheme(scheme="balanced"):
      elif os_name == "Linux":
          print("OS: Linux")
          set_cpu_governor()
-         print("Set power scheme to saving.")
+         print("Set power scheme to conservative.")
      elif os_name == "Darwin":
          print("OS: macOS")
      else:
@@ -917,7 +935,7 @@ def realize_scenario(
                # Remark: By this variant, parallel requests at the same machine are realized in parallel. Hence, individual stdout and stderr have been created so that CLI output is separated correctly.
                # Please note, message broaker does not manage requests. Indeed, each machine requires a manager for efficient ressource allocation.
                try:
-                    run_docker_compose(sender, receiver, log_directory, log_to_file=False)
+                    run_docker_compose(sender, receiver, log_directory, log_to_file=True)
                     # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     # with open(log_directory+"/"+sender+ "_" + timestamp + "_stdout.txt", "wb") as out, \
                     #      open(log_directory+"/"+sender+ "_" + timestamp + "_stderr.txt", "wb") as err:
