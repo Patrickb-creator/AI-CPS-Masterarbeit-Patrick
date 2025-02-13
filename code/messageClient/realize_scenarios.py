@@ -7,7 +7,7 @@ import os
 import platform
 import numpy
 from datetime import datetime
-from codecarbon import EmissionsTracker
+# from codecarbon import EmissionsTracker
 
 # change power scheme in windows
 def set_power_scheme(scheme_guid):
@@ -838,10 +838,10 @@ def run_docker_compose(sender, receiver, log_directory, log_to_file=True):
           stderr_stream = subprocess.PIPE
 
      # codecarbon just for testing
-     tracker = EmissionsTracker(measure_power_secs=1, allow_multiple_runs=True)  # CodeCarbon Tracker für Stromverbrauchsmessung
+     # tracker = EmissionsTracker(measure_power_secs=1, allow_multiple_runs=True)  # CodeCarbon Tracker für Stromverbrauchsmessung
 
      try:
-          tracker.start()  # Messung starten
+          # tracker.start()  # Messung starten
           # Docker Compose Prozess starten
           p = subprocess.Popen(
                f"docker-compose -f {log_directory}/{sender}-docker-compose.yml up --remove-orphans",
@@ -869,9 +869,9 @@ def run_docker_compose(sender, receiver, log_directory, log_to_file=True):
           set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
           print("Set power scheme to balanced.")
      finally:
-          emissions = tracker.stop()  # Messung beenden
+          # emissions = tracker.stop()  # Messung beenden
           # Ausgabe der Emissionsdaten
-          print(emissions)
+          # print(emissions)
           
           if log_to_file:
                     stdout_stream.close()
