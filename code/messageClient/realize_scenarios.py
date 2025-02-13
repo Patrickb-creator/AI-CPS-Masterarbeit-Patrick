@@ -866,8 +866,8 @@ def run_docker_compose(sender, receiver, log_directory, log_to_file=True):
                if stderr:
                     with open(stderr_file, "ab") as f:
                          f.write(stderr)
-          set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
-          print("Set power scheme to balanced.")
+          # set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
+          # print("Set power scheme to balanced.")
      finally:
           # emissions = tracker.stop()  # Messung beenden
           # Ausgabe der Emissionsdaten
