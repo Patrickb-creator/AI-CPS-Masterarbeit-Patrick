@@ -109,8 +109,8 @@ def get_local_ip():
 local_ip = get_local_ip()
 print(f"Lokale IP-Adresse: {local_ip}")
 
-# get the latest broker ip of the broker which was started
-def get_broker_ip():
+# get the latest broker ip of the brokedr which was started
+def get_broker_ip_via_file():
     # Der aktuelle Ordner, in dem sich der ausführende Code befindet
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -344,7 +344,7 @@ if __name__ == '__main__':
         print(f"Using broker: {MQTT_Broker}:{Broker_Port}")
     else:
         print("No MQTT broker discovered, using fallback IP.")
-        MQTT_Broker = get_broker_ip() or "localhost"
+        MQTT_Broker = get_broker_ip_via_file() or "localhost"
         Broker_Port = 1883
 
     # establish connection of client and server
