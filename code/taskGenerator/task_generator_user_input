@@ -16,13 +16,10 @@ import paho.mqtt.client as mqtt
 import os
 import random
 import time
-import messageClient.mqtt_broker_listener as broker_listener
 
-# Add the parent directory (where "taskGenerator" is) to the Python path
+# Add the parent directory (where "taskGenerator" is) to the Python path so it finds the modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from messageClient import mqtt_broker_listener
-from taskGenerator import get_bases
-
 from taskGenerator import get_bases
 
 # MQTT-config
@@ -62,40 +59,35 @@ def get_broker_ip():
 def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
 
-def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
-    scenarios = [
-        "apply_annSolution",
-        "create_annSolution",
-        "refine_annSolution",
-    ]
+def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%"):
+    # define available task types
+    scenarios = {
+        "1": "apply_annSolution",
+        "2": "create_annSolution",
+        "3": "refine_annSolution",
+        "4": "wire_annSolution"
+    }
 
-    # fet bases from the directory
+    # check if the task type is valid
+    if task_type not in scenarios:
+        print("Unavailable task type! Please choose available type.")
+        return
+
+    scenario = scenarios[task_type]  # Wähle den gewählten Aufgabentyp aus
+    tasks = []
+
+    # Holt die Daten für die Basen
     all_bases = get_bases.get_bases()
 
-    # filter out specific knowledge bases
+    # filter bases
     excluded_bases = ["knowledgeBase_cps1_transport_system_01", "knowledgeBase_cps2_transport_system_01"]
-
     knowledge_base = [base for base in all_bases if "knowledgebase" in base and base not in excluded_bases]
     activation_base = [base for base in all_bases if "activationbase" in base]
     learning_base = [base for base in all_bases if "learningbase" in base]
     code_base = "marcusgrum/codebase_ai_core_for_image_classification"
 
-#  for _ in range(number_of_tasks):
-#         scenario = random.choice(scenarios)
-#         task = {
-#             "scenario": scenario,
-#             "knowledge_base": random.choice(knowledge_base) if scenario != "create_annSolution" else "-",
-#             "activation_base": random.choice(activation_base) if scenario != "create_annSolution" else "-",
-#             "learning_base": random.choice(learning_base) if scenario != "apply_annSolution" else "-",
-#             "code_base": code_base,
-#             "sender": "{SENDER}",  # Platzhalter
-#             "receiver": "{RECEIVER}",  # Platzhalter
-#         }
-#         tasks.append(task)
-
     tasks = []
     for _ in range(number_of_tasks):
-        scenario = random.choice(scenarios)
         if scenario == "apply_annSolution":
             task = f"mosquitto_pub " \
                 f"-h {host} " \
@@ -159,21 +151,21 @@ def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="use
                     # f"receiver={receiver}\" "
         tasks.append(task)
 
-    # store the generated tasks to an output file
-    output_file = os.path.join(current_dir, "generated_tasks.txt")
+    # Speichert die generierten Aufgaben in einer Ausgabedatei
+    output_file = os.path.join(current_dir, "_input_generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
             file.write(task + "\n")
 
     print(f"{number_of_tasks} tasks were stored in {output_file}.")
 
-    # publih a message to the Task Manager, that new Tasks where generated
+    # Benachrichtigt das Task-Management-System über die generierten Aufgaben
     client.publish(MQTT_Task_Generator_Topic, f"{number_of_tasks} new tasks generated", qos=1)
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
 
 
 def main():
-    # initialize MQTT-Client
+    # Initialisiere den MQTT-Client
     client = mqtt.Client()
     client.on_connect = on_connect
     client.username_pw_set(MQTT_Username, MQTT_Password)
@@ -197,19 +189,29 @@ def main():
 
     while True:
         try:
-            user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
+            # Benutzer nach der Anzahl der Aufgaben fragen
+            user_input = input("Wie viele Aufgaben sollen generiert werden? (Gib eine Zahl oder 'exit' zum Beenden ein): ")
             if user_input.lower() == "exit":
-                print("Exiting Task Generator.")
+                print("Task Generator wird beendet.")
                 break
 
             number_of_tasks = int(user_input)
             if number_of_tasks <= 0:
-                print("Please enter a positive number.")
+                print("Bitte eine positive Zahl eingeben.")
                 continue
 
-            task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=broker_info)
+            # Benutzer nach dem Aufgabentyp fragen
+            print("Wählen Sie den Aufgabentyp:")
+            print("1: apply_annSolution")
+            print("2: create_annSolution")
+            print("3: refine_annSolution")
+            task_type = input("Geben Sie die Nummer des Aufgabentyps ein: ")
+
+            # Generiere die Aufgaben basierend auf der Eingabe
+            task_generator(number_of_tasks=number_of_tasks, task_type=task_type, MQTT_topic="mqttTester", client=client, host=broker_info)
+
         except ValueError:
-            print("Invalid input. Please enter a valid number.")
+            print("Ungültige Eingabe. Bitte eine gültige Zahl eingeben.")
 
     client.loop_stop()
     client.disconnect()
