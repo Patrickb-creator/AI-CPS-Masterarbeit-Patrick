@@ -35,7 +35,7 @@ task_types = defaultdict(list)
 client_energy_data = defaultdict(lambda: {"apply": 0, "create": 0, "refine": 0, "task_count": 0})
 
 # get the latest broker ip of the broker which was started
-def get_broker_ip():
+def get_broker_ip_via_file():
    broker_dir = os.path.join(parent_dir, "messageBroker")
    ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
 
@@ -220,7 +220,7 @@ if __name__ == '__main__':
    # set Last Will Message so the manager knows where not to give tasks anymore
    client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=True)
 
-   MQTT_Broker = get_broker_ip()
+   MQTT_Broker = get_broker_ip_via_file()
    Broker_Port = 1883
 
    try:
