@@ -30,6 +30,9 @@ MQTT_Username = "user1"
 MQTT_Password = "WhHe1NPfDBJ%"
 MQTT_Task_Generator_Topic = "task_generator"
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+
 # if you want to read bases from the bases.txt file, because you don´t have the images folder
 # use this method in task_generator instead of the method in get_bases
 def read_bases(bases_file):
@@ -43,9 +46,7 @@ def read_bases(bases_file):
     return file_entries
 
 # get the latest broker IP of the broker which was started
-def get_broker_ip():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
+def get_broker_ip_via_file():
     broker_dir = os.path.join(parent_dir, "messageBroker")
     ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
     try:
@@ -178,7 +179,7 @@ def main():
         print(f"Using broker: {MQTT_Broker}:{Broker_Port}")
     else:
         print("No MQTT broker discovered, using fallback IP.")
-        MQTT_Broker = get_broker_ip() or "localhost"
+        MQTT_Broker = get_broker_ip_via_file() or "localhost"
         Broker_Port = 1883
 
     # establish connection of client and server
