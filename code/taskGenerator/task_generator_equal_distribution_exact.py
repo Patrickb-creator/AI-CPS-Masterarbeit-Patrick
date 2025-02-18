@@ -35,15 +35,15 @@ def generate_exact_tasknumber(number_of_tasks):
     scenarios = ["apply_annSolution", "create_annSolution", "refine_annSolution", "wire_annSolution"]
     percentages = [0.5, 0.2, 0.25, 0.05]
     
-    # Calculate the exact number of tasks per type
+    # calculate the exact number of tasks per type
     task_counts = [round(number_of_tasks * p) for p in percentages]
     
-    # If rounding does not match the desired number, correct it
+    # if rounding does not match the desired number, correct it
     while sum(task_counts) < number_of_tasks:
-        task_counts[task_counts.index(min(task_counts))] += 1  # Increment the smallest group
+        task_counts[task_counts.index(min(task_counts))] += 1  # increment the smallest group
 
     while sum(task_counts) > number_of_tasks:
-        task_counts[task_counts.index(max(task_counts))] -= 1  # Reduce the largest group
+        task_counts[task_counts.index(max(task_counts))] -= 1  # reduce the largest group
 
     return scenarios, task_counts
 
@@ -139,6 +139,8 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
         percentage = (count / number_of_tasks) * 100
         print(f"{scenario}: {count} tasks ({percentage:.2f}%)")
     
+    # comment out if you want the tasks to be ordered
+    random.shuffle(tasks)
     # save the tasks
     output_file = os.path.join(current_dir, "exact_ditribution_generated_tasks.txt")
     with open(output_file, "w") as file:
