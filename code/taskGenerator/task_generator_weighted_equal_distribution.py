@@ -42,9 +42,9 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
         "refine_annSolution",
         "wire_annSolution"
     ]
-    weights = [0.5, 0.2, 0.25, 0.05]  # weighted possibilitys: apply 40%, create 20%, refine 30%, wire 10%
+    weights = [0.5, 0.2, 0.25, 0.05]  # weighted possibilitys: apply 50%, create 20%, refine 25%, wire 5%
 
-    # Holen der Basislisten
+    # get bases
     all_bases = get_bases.get_bases()
 
     # filter bases
@@ -60,7 +60,7 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
     tasks = []
     for _ in range(number_of_tasks):
         scenario = random.choices(scenarios, weights=weights)[0]
-        scenario_count[scenario] += 1  # Erhöhe den Zähler für das gewählte Szenario
+        scenario_count[scenario] += 1
         if scenario == "apply_annSolution":
             task = f"mosquitto_pub " \
                 f"-h {host} " \
@@ -124,19 +124,20 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
                     # f"receiver={receiver}\" "
         tasks.append(task)
     
-    # Berechnung der Prozentwerte
     print("Task Distribution:")
     for scenario, count in scenario_count.items():
         percentage = (count / number_of_tasks) * 100
         print(f"{scenario}: {count} tasks ({percentage:.2f}%)")
     
-    # Speicherung der generierten Aufgaben
+    # save generated task types
     output_file = os.path.join(current_dir, "weighted_equals_generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
             file.write(task + "\n")
 
     print(f"{number_of_tasks} tasks were stored in {output_file}.")
+
+    # inform manager about new tasks
     client.publish(MQTT_Task_Generator_Topic, f"{number_of_tasks} new tasks generated", qos=1)
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
 

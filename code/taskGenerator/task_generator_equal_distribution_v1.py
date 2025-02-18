@@ -1,10 +1,3 @@
-# Festgelegte prozentuale Verteilung (Weighted Distribution)
-
-# Falls du eine bestimmte Prozentverteilung beibehalten willst, kannst du eine gewichtete Wahrscheinlichkeitsverteilung nutzen.
-# Beispielsweise könnten die Wahrscheinlichkeiten für die Szenarien so sein:
-# P(apply)=40%,P(create)=30%,P(refine)=30%
-# Wenn du Experimente vergleichbar halten willst, solltest du eine feste gewichtete Verteilung verwenden, unabhängig von der Gesamtanzahl der generierten Aufgaben.
-# Dann generierst du Aufgaben basierend auf diesen Wahrscheinlichkeiten (z. B. mit random.choices(scenarios, weights=[40, 30, 30]) in Python).
 import sys
 import paho.mqtt.client as mqtt
 import os
@@ -47,7 +40,7 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
         "wire_annSolution"
     ]
 
-    # Holen der Basislisten
+    # get bases
     all_bases = get_bases.get_bases()
 
    # filter bases
@@ -124,14 +117,13 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
                     # f"sender={sender}, " \
                     # f"receiver={receiver}\" "
         tasks.append(task)
-    
-    # Berechnung der Prozentwerte
+
     print("Task Distribution:")
     for scenario, count in scenario_counts.items():
         percentage = (count / number_of_tasks) * 100
         print(f"{scenario}: {count} tasks ({percentage:.2f}%)")
     
-    # Speicherung der generierten Aufgaben
+    # save tasks
     output_file = os.path.join(current_dir, "equals_generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:

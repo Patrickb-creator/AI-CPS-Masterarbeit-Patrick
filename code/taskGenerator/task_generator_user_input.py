@@ -40,7 +40,7 @@ def read_bases(bases_file):
     with open(bases_file, "r") as file:
         file_entries = file.readlines()
             
-        # Zeilen ohne Zeilenumbrüche bereinigen
+        # clean up lines
         file_entries = [line.strip() for line in file_entries]
     
     return file_entries
@@ -55,7 +55,7 @@ def get_broker_ip_via_file():
         return broker_ip
     except FileNotFoundError:
         print(f"File {ip_file} not found")
-        return "localhost"  # Fallback auf localhost
+        return "localhost"  # Fallback to localhost
 
 def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
@@ -74,10 +74,10 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
         print("Unavailable task type! Please choose available type.")
         return
 
-    scenario = scenarios[task_type]  # Wähle den gewählten Aufgabentyp aus
+    scenario = scenarios[task_type]  # choose task type
     tasks = []
 
-    # Holt die Daten für die Basen
+    # get bases
     all_bases = get_bases.get_bases()
 
     # filter bases
@@ -152,7 +152,7 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
                     # f"receiver={receiver}\" "
         tasks.append(task)
 
-    # Speichert die generierten Aufgaben in einer Ausgabedatei
+    # save generated task types
     output_file = os.path.join(current_dir, "_input_generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
@@ -160,7 +160,7 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
 
     print(f"{number_of_tasks} tasks were stored in {output_file}.")
 
-    # Benachrichtigt das Task-Management-System über die generierten Aufgaben
+    # inform manager about new tasks
     client.publish(MQTT_Task_Generator_Topic, f"{number_of_tasks} new tasks generated", qos=1)
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
 
@@ -191,18 +191,18 @@ def main():
     while True:
         try:
             # Benutzer nach der Anzahl der Aufgaben fragen
-            user_input = input("Wie viele Aufgaben sollen generiert werden? (Gib eine Zahl oder 'exit' zum Beenden ein): ")
+            user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
             if user_input.lower() == "exit":
-                print("Task Generator wird beendet.")
+                print("Exiting Task Generator.")
                 break
 
             number_of_tasks = int(user_input)
             if number_of_tasks <= 0:
-                print("Bitte eine positive Zahl eingeben.")
+                print("Please enter a positive number.")
                 continue
 
-            # Benutzer nach dem Aufgabentyp fragen
-            print("Wählen Sie den Aufgabentyp:")
+            # ask user to give a task type
+            print("Choose the task type:")
             print("1: apply_annSolution")
             print("2: create_annSolution")
             print("3: refine_annSolution")
@@ -212,7 +212,7 @@ def main():
             task_generator(number_of_tasks=number_of_tasks, task_type=task_type, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
 
         except ValueError:
-            print("Ungültige Eingabe. Bitte eine gültige Zahl eingeben.")
+            print("Invalid input. Choose valid number.")
 
     client.loop_stop()
     client.disconnect()
