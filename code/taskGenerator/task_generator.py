@@ -71,7 +71,7 @@ def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="use
     all_bases = get_bases.get_bases()
 
     # filter out specific knowledge bases
-    excluded_bases = ["knowledgeBase_cps1_transport_system_01", "knowledgeBase_cps2_transport_system_01"]
+    excluded_bases = ["marcusgrum/knowledgebase_cps1_transport_system_01", "marcusgrum/knowledgebase_cps2_transport_system_01"]
 
     knowledge_base = [base for base in all_bases if "knowledgebase" in base and base not in excluded_bases]
     activation_base = [base for base in all_bases if "activationbase" in base]
@@ -205,7 +205,7 @@ def main():
                 print("Please enter a positive number.")
                 continue
 
-            task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=broker_info)
+            task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
         except ValueError:
             print("Invalid input. Please enter a valid number.")
 

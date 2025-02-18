@@ -81,7 +81,7 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
     all_bases = get_bases.get_bases()
 
     # filter bases
-    excluded_bases = ["knowledgeBase_cps1_transport_system_01", "knowledgeBase_cps2_transport_system_01"]
+    excluded_bases = ["marcusgrum/knowledgebase_cps1_transport_system_01", "marcusgrum/knowledgebase_cps2_transport_system_01"]
     knowledge_base = [base for base in all_bases if "knowledgebase" in base and base not in excluded_bases]
     activation_base = [base for base in all_bases if "activationbase" in base]
     learning_base = [base for base in all_bases if "learningbase" in base]
@@ -209,7 +209,7 @@ def main():
             task_type = input("Geben Sie die Nummer des Aufgabentyps ein: ")
 
             # Generiere die Aufgaben basierend auf der Eingabe
-            task_generator(number_of_tasks=number_of_tasks, task_type=task_type, MQTT_topic="mqttTester", client=client, host=broker_info)
+            task_generator(number_of_tasks=number_of_tasks, task_type=task_type, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
 
         except ValueError:
             print("Ungültige Eingabe. Bitte eine gültige Zahl eingeben.")
