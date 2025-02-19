@@ -47,6 +47,8 @@ hostArch = platform.machine()
 
 # Log directory for task results
 project_root = os.getcwd()  # Hauptverzeichnis
+
+# verzeichnis anpassen an windows oder an linux je nachdem wo es läuft 
 logDirectory = os.path.join(project_root, "code/messageClient/task_logs")
 if not os.path.exists(logDirectory):
     os.makedirs(logDirectory, exist_ok=True)
@@ -66,7 +68,7 @@ hostArch = hostArch.lower()
 
 if hostArch == 'amd64':
      hostArch = 'x86_64'
-if hostArch == 'amd_64_gpu':
+if hostArch == 'amd64_gpu':
      hostArch = 'x86_64_gpu'
 
 MQTT_Topic_Execute = 'mqttTester'
