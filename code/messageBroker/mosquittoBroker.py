@@ -30,7 +30,10 @@ broker_ip_log = os.path.join(broker_ip_log_path, "broker_ip_log.txt")
 def get_local_ip():
     """Get the local IP address of the current machine."""
     hostname = socket.gethostname()
-    return socket.gethostbyname(hostname)
+    addr_info = socket.getaddrinfo(hostname, None)
+    for addr in addr_info:
+        if addr[0] == socket.AF_INET:  # IPv4
+            return addr[4][0]
 
 def write_broker_ip(local_ip):
     """Write the broker's IP address to a file."""
@@ -42,7 +45,9 @@ def write_broker_ip(local_ip):
 
 def register_mdns_service(local_ip):
     """Register the MQTT broker over mDNS (Zeroconf)."""
-    service_name = "MQTT Broker._mqtt._tcp.local."
+    hostname = socket.gethostname()
+    service_name = f"{hostname}._mqtt._tcp.local."
+
     info = ServiceInfo(
         type_="_mqtt._tcp.local.",
         name=service_name,
