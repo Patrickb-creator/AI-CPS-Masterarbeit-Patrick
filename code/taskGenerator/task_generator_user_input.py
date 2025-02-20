@@ -153,7 +153,7 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
         tasks.append(task)
 
     # save generated task types
-    output_file = os.path.join(current_dir, "_input_generated_tasks.txt")
+    output_file = os.path.join(current_dir, "input_generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
             file.write(task + "\n")

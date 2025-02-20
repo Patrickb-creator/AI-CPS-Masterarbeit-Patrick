@@ -141,8 +141,9 @@ def task_generator(number_of_tasks, MQTT_topic, client, host):
     
     # comment out if you want the tasks to be ordered
     random.shuffle(tasks)
+    
     # save the tasks
-    output_file = os.path.join(current_dir, "exact_ditribution_generated_tasks.txt")
+    output_file = os.path.join(current_dir, "exact_distribution_generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
             file.write(task + "\n")
