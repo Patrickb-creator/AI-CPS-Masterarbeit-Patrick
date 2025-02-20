@@ -807,22 +807,22 @@ def unroll_sensorValuesFromScenario(message):
      
      return scenario, cps1_conveyor_workpieceSensorLeft, cps1_conveyor_workpieceSensorCenter, cps1_conveyor_workpieceSensorRight, cps2_conveyor_workpieceSensorLeft, cps2_conveyor_workpieceSensorCenter, cps2_conveyor_workpieceSensorRight
 
-# clear log directory when processing many tasks at once
-def clear_log_directory(log_directory):
-    """
-    clears log before new tasks are executed
-    """
-    if not os.path.exists(log_directory):
-        os.makedirs(log_directory)  # create dir if it does´nt exist yet
+# # clear log directory when processing many tasks at once
+# def clear_log_directory(log_directory):
+#     """
+#     clears log before new tasks are executed
+#     """
+#     if not os.path.exists(log_directory):
+#         os.makedirs(log_directory)  # create dir if it does´nt exist yet
 
-    # delete all files in the logdirectory
-    for filename in os.listdir(log_directory):
-        file_path = os.path.join(log_directory, filename)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-    print(f"Log-Verzeichnis {log_directory} wurde geleert.")
+#     # delete all files in the logdirectory
+#     for filename in os.listdir(log_directory):
+#         file_path = os.path.join(log_directory, filename)
+#         if os.path.isfile(file_path):
+#             os.remove(file_path)
+#     print(f"Log-Verzeichnis {log_directory} wurde geleert.")
 
-def run_docker_compose(sender, receiver, log_directory, log_to_file=True):
+def run_docker_compose_parallel(sender, receiver, log_directory, log_to_file=True):
      timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # paths to log files
@@ -874,8 +874,61 @@ def run_docker_compose(sender, receiver, log_directory, log_to_file=True):
           # print(emissions)
           
           if log_to_file:
-                    stdout_stream.close()
-                    stderr_stream.close()
+               stdout_stream.close()
+               stderr_stream.close()
+
+
+def run_docker_compose_sequential(sender, receiver, log_directory, log_to_file=True):
+     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # paths to log files
+     stdout_file = f"{log_directory}/{sender}_{timestamp}_stdout.txt"
+     stderr_file = f"{log_directory}/{sender}_{timestamp}_stderr.txt"
+
+    # creation of log files, if user wants to have them
+     if log_to_file:
+          stdout_stream = open(stdout_file, "wb")
+          stderr_stream = open(stderr_file, "wb")
+     else:
+          stdout_stream = subprocess.PIPE
+          stderr_stream = subprocess.PIPE
+
+     # codecarbon just for testing
+     # tracker = EmissionsTracker(measure_power_secs=1, allow_multiple_runs=True)  # CodeCarbon Tracker für Stromverbrauchsmessung
+
+     try:
+          # code is waiting until docker really finished! so we dont need a ressource manager
+          p = subprocess.run(
+               f"docker-compose -f {log_directory}/{sender}-docker-compose.yml up --remove-orphans",
+               shell=True, stdout=stdout_stream, stderr=stderr_stream
+               )
+        
+          print(f'Message of {sender} has been triggered at {receiver} successfully!')
+          
+          # use stdout and stderr directly from the process p
+          if p.stdout:
+              if log_to_file:
+                  with open(stdout_file, "ab") as f:
+                      f.write(p.stdout)
+              else:
+                  print(p.stdout.decode('utf-8'))
+
+          if p.stderr:
+              if log_to_file:
+                  with open(stderr_file, "ab") as f:
+                      f.write(p.stderr)
+              else:
+                  print(p.stderr.decode('utf-8'))
+                    # set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
+                    # print("Set power scheme to balanced.")
+     finally:
+          # emissions = tracker.stop()  # Messung beenden
+          # Ausgabe der Emissionsdaten
+          # print(emissions)
+          
+          if log_to_file:
+               stdout_stream.close()
+               stderr_stream.close()
 
 def realize_scenario(
           log_directory, 
@@ -895,7 +948,8 @@ def realize_scenario(
      This function realizes scenarios, such as from communication client
      and manages the corresponding AI reguests.
      """
-     clear_log_directory(log_directory)
+     # clear_log_directory(log_directory)
+     
      # build docker-compose file based on message
      # for standard situations (experiment01-04)
      if (scenario == 'apply_annSolution'):
@@ -926,16 +980,14 @@ def realize_scenario(
                # Remark: By this variant, parallel requests at the same machine are realized sequentially, which is managed by message broaker (next request is delivered when previous request has been finished).
                #         So, requests are realized one after the other.
                # subprocess.call("docker-compose -f "+logDirectory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
-               subprocess.run("docker-compose -f "+log_directory+"/"+sender+"-docker-compose.yml up --remove-orphans", shell=True)
-               print('Message of ' + sender + ' has been processed at ' + receiver + ' successfully!')
-               client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')
+               run_docker_compose_sequential(sender, receiver, log_directory, log_to_file=True)
 
           if (sub_process_method == "parallel"):
                # b) by subprocess.Popen()
                # Remark: By this variant, parallel requests at the same machine are realized in parallel. Hence, individual stdout and stderr have been created so that CLI output is separated correctly.
                # Please note, message broaker does not manage requests. Indeed, each machine requires a manager for efficient ressource allocation.
                try:
-                    run_docker_compose(sender, receiver, log_directory, log_to_file=True)
+                    run_docker_compose_parallel(sender, receiver, log_directory, log_to_file=True)
                     # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     # with open(log_directory+"/"+sender+ "_" + timestamp + "_stdout.txt", "wb") as out, \
                     #      open(log_directory+"/"+sender+ "_" + timestamp + "_stderr.txt", "wb") as err:
@@ -953,7 +1005,7 @@ def realize_scenario(
                     #      if stderr:
                     #           with open(f"{log_directory}/{sender}_stderr.txt", "a") as f:
                     #                f.write(stderr.decode('utf-8'))
-                    client.publish(MQTT_Topic_Results, hostName + ': This is a result indication! I have processed the ann request.')                                                   
+                    client.publish(MQTT_Topic_Results, hostName + ': Docker compose ran')                                                   
                except Exception as e:
                     print(f"Fehler beim Ausführen des Szenarios: {str(e)}")
                     client.publish(MQTT_Topic_Results, hostName + ': This is an error! I could not process the ann request!')                                                   

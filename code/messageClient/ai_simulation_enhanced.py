@@ -37,7 +37,7 @@ sys.path.insert(0, '../experiments')
 task_queue = Queue()
 
 # specify global variables, so that they are known (1) at messageClient start and (2) at function calls from external scripts
-global hostName, hostArch, logDirectory
+global hostName, hostArch, log_directory
 # hostName = os.name
 # hostname muss dynamisch auf die Nummer 
 # des PCs im Netzwerk zugewiesen werden oder wir gehen dann über die IP Adressen 
@@ -49,20 +49,23 @@ hostArch = platform.machine()
 project_root = os.getcwd()  # Hauptverzeichnis
 
 # verzeichnis anpassen an windows oder an linux je nachdem wo es läuft 
-logDirectory = os.path.join(project_root, "code/messageClient/task_logs")
-if not os.path.exists(logDirectory):
-    os.makedirs(logDirectory, exist_ok=True)
-print(f"Logs are saved here: {logDirectory}")
+log_directory = os.path.join(project_root, "code/messageClient/task_logs")
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory, exist_ok=True)
+print(f"Logs are saved here: {log_directory}")
+
+nvidia_gpu = False
 
 try:
     subprocess.check_output('nvidia-smi')
     print('Nvidia GPU detected!')
+    nvidia_gpu = True
     hostArch = hostArch + "_gpu"
 except Exception:
     print('No Nvidia GPU in system!')
     hostArch = hostArch + ""
-if not os.path.exists(logDirectory):
-    os.makedirs(logDirectory)
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory)
 
 hostArch = hostArch.lower()
 
@@ -73,7 +76,6 @@ if hostArch == 'amd64_gpu':
 
 MQTT_Topic_Execute = 'mqttTester'
 MQTT_Topic_Results = 'mqttTester/results'
-MQTT_Tasks = "tasks/#"
 
 # Utility functions
 def get_or_generate_client_id():
@@ -135,7 +137,7 @@ def get_broker_ip_via_file():
 
 # Callback für Pings
 def on_ping_request(client, userdata, msg):
-    print(f"Ping received: {msg.payload.decode()}")
+    # print(f"Ping received: {msg.payload.decode()}") -> this works perfectly fine but it spams the cmd
     client.publish(f"ping/response/{client_id}", "I'm alive!", qos=1)
 
 def load_data_fromfile(path):
@@ -187,40 +189,60 @@ def on_connect(client, userdata, flags, rc):
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
     client.subscribe(MQTT_Topic_Execute, qos = 0)  # channel to deal with CoNM
-    client.subscribe(MQTT_Topic_Results, qos = 0)
-    client.subscribe("ping/request")  # Subscribe zum Empfangen von Pings
-    client.subscribe("tasks/#")
-    client.message_callback_add("ping/request", on_ping_request)  # Callback hinzufügen
+    # client.subscribe(MQTT_Topic_Results, qos = 0) we dont have to get the results as a client:)
+    client.subscribe("ping/request")  # Subscribe to pings
+    client.subscribe(f"tasks/{client_id}")
+    client.message_callback_add("ping/request", on_ping_request)  # Callback for pings
     # ...
 
+# clear log directory when processing many tasks at once
+def clear_log_directory(log_directory):
+    """
+    clears log before new tasks are executed
+    """
+    if not os.path.exists(log_directory):
+        os.makedirs(log_directory)  # create dir if it does´nt exist yet
+
+    # delete all files in the logdirectory
+    for filename in os.listdir(log_directory):
+        file_path = os.path.join(log_directory, filename)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+    print(f"Log-Verzeichnis {log_directory} wurde geleert.")
+
 # Handle incoming messages and push them to the task queue
-# die task queue macht dann nur sinn wenn ein paket an aufgaben an den client verteilt wird und nicht nur eins
 def on_message(client, userdata, msg):
     message = msg.payload.decode()
     topic = msg.topic
-    print(f"Received message on topic {topic}: {message}")
+    # print(f"Received message on topic {topic}: {message}")
 
     if topic.startswith(f"tasks/{client_id}"):
-        print(f"{client_id}: New task received: {message}")
-
         # split message by newline and enqueue each task separately
-        # TODO: CLEAR TASK LOG BEFOREHAND
         task_list = message.strip().split("\n")
+        print(f"{client_id}: I received {len(task_list)} new tasks.")
+        clear_log_directory(log_directory) # clear all logs to avoid spam
+
         for task in task_list:
             if task.strip():  # Check if task is not empty
                 task_queue.put((topic, task))
 
 def task_worker():
+    # if not task_queue.empty:
+    #     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    #     starting_message = f"[{timestamp}] Starting Task Processing."
+    #     print(starting_message)
+
     while True:
         topic, message = task_queue.get()
         if message == "STOP":
             print("Stopping task worker.")
             break
+
         scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver = unroll_message(message)
         
         if receiver == client_id:
             executor.realize_scenario(
-                logDirectory, 
+                log_directory, 
                 MQTT_Topic_Results, 
                 scenario, 
                 knowledge_base, 
@@ -232,9 +254,15 @@ def task_worker():
                 receiver, 
                 client_id, 
                 hostArch,
-                sub_process_method="parallel")
-            print(f"Task {message} executed by {client_id}.")
+                sub_process_method="sequential")
+            client.publish(MQTT_Topic_Results, client_id + ': This is a result indication! I have processed the ann request.')
+            print(f"Task {scenario} executed by {client_id}.")
         task_queue.task_done()
+
+        if task_queue.empty():
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            completion_message = f"[{timestamp}] I processed all tasks.\n"
+            print(completion_message)
 
 # The callback for when a PUBLISH message is received from the server.
 # def on_message(client, userdata, msg):
