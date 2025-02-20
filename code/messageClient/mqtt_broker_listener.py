@@ -7,10 +7,10 @@ class MQTTBrokerListener(ServiceListener):
         self.broker_info = None
 
     def update_service(self, zeroconf, service_type, name):
-        pass
+        print(f"Updated service: {name}")
 
     def remove_service(self, zeroconf, service_type, name):
-        pass
+        print(f"Removed service: {name}")
 
     def add_service(self, zeroconf, service_type, name):
         info = zeroconf.get_service_info(service_type, name)
