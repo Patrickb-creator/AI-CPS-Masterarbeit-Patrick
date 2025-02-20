@@ -7,20 +7,14 @@ from zeroconf import ServiceInfo, Zeroconf
 
 # log file and config settings
 broker_logfile = "mosquitto.log"
-# logging.basicConfig(
-#     filename=broker_logfile,  # name of the log file
-#     level=logging.INFO,  # log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-#     format="%(asctime)s - %(levelname)s - %(message)s",  # log format
-#     filemode="w",  # mode: "w" for overwrite, "a" for append
-# )
 
-# Logging einrichten, um sowohl in der Konsole als auch in einer Logdatei zu loggen
+# logging to log in cmd and file, does not work properly..
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),  # Loggt in die Konsole
-        logging.FileHandler("broker_logs.log", mode="a")  # Loggt in die Datei "broker_logs.log"
+        logging.StreamHandler(),  # log to cmd
+        logging.FileHandler("broker_logs.log", mode="a")  # log to file "broker_logs.log"
     ]
 )
 
@@ -84,7 +78,7 @@ def start_mqtt_broker_and_log():
         print(f"Configuration file path: {config_path}")
 
         process = subprocess.Popen(
-            ["mosquitto", "-c", config_path, "-v"],  # -v für detailliertes Logging
+            ["mosquitto", "-c", config_path, "-v"],  # -v for detailed Logging
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             # text=True,
@@ -98,17 +92,13 @@ def start_mqtt_broker_and_log():
             if output == "" and process.poll() is not None and error_output == "":
                 break
             if output:
-                # print(output.strip())
-                # logging.info(output.strip())
-                output_str = output.strip().decode("utf-8")  # Entschlüsseln und strippen
-                print(output_str)  # Zeige die Ausgabe in der Konsole
-                logging.info(output_str)  # Logge es in der Logdatei
+                output_str = output.strip().decode("utf-8")  # decrypt and strip
+                print(output_str)  # show in cmd
+                logging.info(output_str)  # log in logfile
             if error_output:
-                # print(error_output.strip())
-                # logging.error(error_output.strip())
                 error_output_str = error_output.strip().decode("utf-8")
-                print(error_output_str)  # Zeige Fehler in der Konsole
-                logging.error(error_output_str)  # Logge Fehler in der Logdatei
+                print(error_output_str)  # show error in cmd
+                logging.error(error_output_str)  # log error in log-file
     except FileNotFoundError:
         logging.error("Mosquitto not found. Is it installed and in PATH?")
         print("Error: Mosquitto not found. Please make sure it is installed.")
