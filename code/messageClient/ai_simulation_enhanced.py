@@ -221,7 +221,7 @@ def on_message(client, userdata, msg):
         task_list = message.strip().split("\n")
         print(f"{client_id}: I received {len(task_list)} new tasks.")
         clear_log_directory(log_directory) # clear all logs to avoid spam
-
+        client.publish("result/status/" + client_id, 1)
         for task in task_list:
             if task.strip():  # Check if task is not empty
                 task_queue.put((topic, task))
@@ -262,6 +262,7 @@ def task_worker():
         if task_queue.empty():
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             completion_message = f"[{timestamp}] I processed all tasks.\n"
+            client.publish("result/status/" + client_id, 0)
             print(completion_message)
 
 # The callback for when a PUBLISH message is received from the server.
@@ -409,6 +410,8 @@ if __name__ == '__main__':
         client.loop_forever()
     except KeyboardInterrupt:
         print("Shutting down...")
+    except Exception as e:
+        print(f"An error occurred: {e}")
     finally:
         print("Cleaning up before exit...")
         client.publish(f"status/{client_id}", "Disconnected", qos=1, retain=False)
