@@ -62,7 +62,9 @@ def load_tasks_from_file():
       os.makedirs(log_directory)
 
    # change this if you use different generators!!
-   task_file = os.path.join(generator_dir, "input_generated_tasks.txt")
+   task_file = os.path.join(generator_dir, "testing_tt_tasks.txt")
+
+   task_list.clear()
 
    try:
       with open(task_file, 'r', encoding='utf-8') as file:
@@ -76,11 +78,10 @@ def load_tasks_from_file():
             timestamp_file = os.path.join(log_directory, f"{timestamp}_{task_count}_TM.txt")
 
             # extend every task with sender and random receiver -> only for random distribution
-            task_list = [
-               f"{task} sender={client_id}, receiver={random.choice(list(connected_clients))}\""
-               for task in loaded_tasks
-            ]
-      print(f"Loaded tasks: {task_list}")
+            for client in connected_clients:
+               task_list.extend(f"{task} sender={client_id}, receiver={client}\"" for task in loaded_tasks)
+
+      print(f"Loaded tasks: {len(task_list)}")
    except Exception as e:
       print(f"File {task_file} not found Error loading tasks:{e}.")
 
@@ -92,42 +93,63 @@ def find_receiver(task):
          receiver = match.group(1).rstrip('"')
          return receiver
    else:
-         print("No receiver fund")
+         print("No receiver found")
 
 # distrbute available tasks randomly to the connected clients
 def distribute_tasks(client):
     global task_list
 
     while not stop_event.is_set():
-        if not connected_clients:
-            print("No connected clients. Waiting...")
+      if not connected_clients:
+         print("No connected clients. Waiting...")
+         time.sleep(5)
+         continue
+
+      with task_lock:
+         if not task_list:
+            print("No tasks available. Waiting for new tasks...")
             time.sleep(5)
             continue
+      
+         while task_list:
+            task = task_list.pop(0)  # get the first task and release it from the task stack
+            target_client = find_receiver(task)  # Find the receiver for this task
 
-        with task_lock:
-            if not task_list:
-                print("No tasks available. Waiting for new tasks...")
-                time.sleep(5)
-                continue
-         
-            # Sende alle verfügbaren Aufgaben an alle verbundenen Clients
-            for target_client in connected_clients:
-                # combine all tasks for the receiver into one string to send them together
-                task_string = "\n".join(task_list)
+            # create a list to hold all tasks for the same receiver
+            combined_tasks = [task]  # start with the first task
 
-                # check if the target client is connected and then send task to the right client
-                if target_client in connected_clients:
-                    client.publish("status/taskWorker", 1, qos=1)  # status=1, weil es beginnt, Aufgaben zu verteilen
-                    client.publish(f"tasks/{target_client}", task_string, qos=1)
-                    print(f"Sent tasks to {target_client}: {task_string}")
+            # find all other tasks with the same receiver and add them together
+            i = 0
+            next_target_client = ""
 
-                    # Logge die Verteilung der Aufgaben
-                    log_event(f"Sent tasks to {target_client}: {task_string}")
-                else:
-                    print(f"Target client {target_client} is not connected. Skipping.")
+            while i < len(task_list):
+               next_task = task_list[i]
+               next_target_client = find_receiver(next_task)
 
-                time.sleep(2)  # kleiner Delay, um die Clients nicht zu überlasten
+               # if the receiver matches, add the task to the combined list
+               if next_target_client == target_client:
+                  combined_tasks.append(next_task)
+                  # remove the task from the list, so it doesn´t appear twice
+                  task_list.pop(i)
+               else:
+                  # otherwise, move to the next task in the list
+                  i += 1
 
+            number_of_tasks = len(combined_tasks)
+            log_event(f"{number_of_tasks} tasks for {target_client}")
+
+            # combine all tasks for the receiver into one string to send them together
+            task_string = "\n".join(combined_tasks)
+
+            # check if the target client is connected and then send task to the right client
+            if target_client in connected_clients:
+               client.publish("start_stop/taskWorker", 1, qos=1) # status=1 cause it starts to distribute tasks
+               client.publish(f"tasks/{target_client}", task_string, qos=1)
+               print(f"Sent {number_of_tasks} tasks to {target_client}.")
+            else:
+               print(f"Target client {target_client} is not connected. Skipping.")
+
+         time.sleep(2) # small delay to avoid overwhelming mqtt
 
 # send pings to clients
 def send_ping(client):
