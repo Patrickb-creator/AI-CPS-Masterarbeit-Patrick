@@ -219,7 +219,8 @@ def on_message(client, userdata, msg):
     if topic.startswith(f"tasks/{client_id}"):
         # split message by newline and enqueue each task separately
         task_list = message.strip().split("\n")
-        print(f"{client_id}: I received {len(task_list)} new tasks.")
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{timestamp} {client_id}: I received {len(task_list)} new tasks.")
         clear_log_directory(log_directory) # clear all logs to avoid spam
         client.publish("result/status/" + client_id, 1)
         for task in task_list:
