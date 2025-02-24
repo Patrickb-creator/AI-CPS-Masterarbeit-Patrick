@@ -22,6 +22,9 @@ MQTT_Publish_Topic = "mqttTester"
 MQTT_Result_Topic = "mqttTester/results"
 MQTT_Task_Generator_Topic = "task_generator"
 connected_clients = set()  # unique set of connected PCs
+
+# add timestamps for the latest pings to the clients
+# client_ping_timestamps = {}
 ping_event = threading.Event()  # event to control ping threads
 stop_event = threading.Event()
 task_event = threading.Event()
@@ -136,7 +139,7 @@ def distribute_tasks(client):
                   i += 1
 
             number_of_tasks = len(combined_tasks)
-            log_event(f"{number_of_tasks} tasks for {next_target_client}")
+            log_event(f"{number_of_tasks} tasks for {target_client}")
 
             # combine all tasks for the receiver into one string to send them together
             task_string = "\n".join(combined_tasks)
@@ -158,6 +161,24 @@ def send_ping(client):
       client.publish("ping/request", "Ping from TaskManager", qos=1)
       time.sleep(10)
 
+
+# remove inactive clients from connected_clients list
+# def remove_inactive_clients():
+#    while not stop_event.is_set():
+#       current_time = time.time()
+#       for client_name in list(connected_clients):
+#          # after 10 sec check if clients not answering the pings anymore
+#          if client_name in client_ping_timestamps:
+#             if current_time - client_ping_timestamps[client_name] > 10:
+#                print(f"Client {client_name} is inactive. Removing from connected clients.")
+#                connected_clients.remove(client_name)
+#                del client_ping_timestamps[client_name]  # remove client from dict
+#          elif client_name not in client_ping_timestamps:
+#             connected_clients.remove(client_name)
+#          else:
+#             continue
+#       time.sleep(5)  # check every 5 sek
+
 # monitor active clients
 def monitor_clients():
    global ping_event
@@ -175,6 +196,9 @@ def monitor_clients():
 # callback function for mqtt connection
 def on_connect(client, userdata, flags, rc):
    print("Connected with result code " + str(rc))
+
+   connected_clients.clear()  # empty set when we are setting a new connection
+
    client.subscribe(MQTT_Publish_Topic, qos=0) # channel to deal with tasks
    client.subscribe(MQTT_Result_Topic, qos=0)
    client.subscribe("status/#") # subscribe to the status of all clients to monitor who is connected
@@ -224,6 +248,8 @@ def on_message(client, userdata, msg):
    elif topic.startswith("ping/response/"):
       client_name = topic.split("/")[-1]
       connected_clients.add(client_name)
+      # client_ping_timestamps[client_name] = time.time()  # set timestamp to now
+        
 
    # extract clients which introduce themselves
    elif topic.startswith("task_generator"):
@@ -256,10 +282,12 @@ if __name__ == '__main__':
       ping_thread = threading.Thread(target=send_ping, args=(client,))
       monitor_thread = threading.Thread(target=monitor_clients)
       task_thread = threading.Thread(target=distribute_tasks, args=(client,))
+      # remove_inactive_clients_thread = threading.Thread(target=remove_inactive_clients)
 
       ping_thread.start()
       monitor_thread.start()
       task_thread.start()
+      # remove_inactive_clients_thread.start()
 
       client.loop_forever()
 
