@@ -211,7 +211,7 @@ def on_message(client, userdata, msg):
       message_count += 1
       if message_count == task_count and task_count > 0:
          log_event(f"All tasks have been processed: done_tasks = {message_count}, init_tasks {task_count}")
-         client.publish("status/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
+         client.publish("start_stop/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
 
    # check for status messages
    if topic.startswith("status/"):
