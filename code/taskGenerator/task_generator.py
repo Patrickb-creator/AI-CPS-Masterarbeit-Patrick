@@ -139,22 +139,22 @@ def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="use
                 f"learning_base={random.choice(learning_base)}, " # \
                 # "sender={sender}, " \
                 # f"receiver={receiver}\" "
-        elif scenario == "wire_annSolution":
-            # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
-            task = f"mosquitto_pub " \
-                    f"-h {host} " \
-                    f"-p 1883 " \
-                    f"-t \"{MQTT_topic}\" "\
-                    f"-u {MQTT_Username} " \
-                    f"-P {MQTT_Password} " \
-                    f'-m "Please realize the following AI case: ' \
-                    f"scenario={scenario}, " \
-                    f"knowledge_base=-, " \
-                    f"activation_base=-, " \
-                    f"code_base={code_base}, " \
-                    f"learning_base=-, " #\
-                    # f"sender={sender}, " \
-                    # f"receiver={receiver}\" "
+        # elif scenario == "wire_annSolution":
+        #     # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
+        #     task = f"mosquitto_pub " \
+        #             f"-h {host} " \
+        #             f"-p 1883 " \
+        #             f"-t \"{MQTT_topic}\" "\
+        #             f"-u {MQTT_Username} " \
+        #             f"-P {MQTT_Password} " \
+        #             f'-m "Please realize the following AI case: ' \
+        #             f"scenario={scenario}, " \
+        #             f"knowledge_base=-, " \
+        #             f"activation_base=-, " \
+        #             f"code_base={code_base}, " \
+        #             f"learning_base=-, " #\
+        #             # f"sender={sender}, " \
+        #             # f"receiver={receiver}\" "
         tasks.append(task)
 
     # store the generated tasks to an output file

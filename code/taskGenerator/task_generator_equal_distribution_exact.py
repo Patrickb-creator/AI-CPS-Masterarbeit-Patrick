@@ -32,7 +32,7 @@ def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
 
 def generate_exact_tasknumber(number_of_tasks):
-    scenarios = ["apply_annSolution", "create_annSolution", "refine_annSolution", "wire_annSolution"]
+    scenarios = ["apply_annSolution", "create_annSolution", "refine_annSolution"]
     percentages = [0.5, 0.2, 0.25, 0.05]
     
     # calculate the exact number of tasks per type
@@ -102,22 +102,22 @@ def create_task(scenario, host, MQTT_topic):
             f"learning_base={random.choice(learning_base)}, " # \
             # "sender={sender}, " \
             # f"receiver={receiver}\" "
-    elif scenario == "wire_annSolution":
-        # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
-        task = f"mosquitto_pub " \
-                f"-h {host} " \
-                f"-p 1883 " \
-                f"-t \"{MQTT_topic}\" "\
-                f"-u {MQTT_Username} " \
-                f"-P {MQTT_Password} " \
-                f'-m "Please realize the following AI case: ' \
-                f"scenario={scenario}, " \
-                f"knowledge_base=-, " \
-                f"activation_base=-, " \
-                f"code_base={code_base}, " \
-                f"learning_base=-, " #\
-                # f"sender={sender}, " \
-                # f"receiver={receiver}\" "
+    # elif scenario == "wire_annSolution":
+    #     # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
+    #     task = f"mosquitto_pub " \
+    #             f"-h {host} " \
+    #             f"-p 1883 " \
+    #             f"-t \"{MQTT_topic}\" "\
+    #             f"-u {MQTT_Username} " \
+    #             f"-P {MQTT_Password} " \
+    #             f'-m "Please realize the following AI case: ' \
+    #             f"scenario={scenario}, " \
+    #             f"knowledge_base=-, " \
+    #             f"activation_base=-, " \
+    #             f"code_base={code_base}, " \
+    #             f"learning_base=-, " #\
+    #             # f"sender={sender}, " \
+    #             # f"receiver={receiver}\" "
     
     return task
 
