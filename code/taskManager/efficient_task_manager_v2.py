@@ -74,6 +74,8 @@ task_timing = defaultdict(list)
 columns = [
     "client_id", 
     "total_power_usage", 
+    "relevant_power_values",
+    "num_of_power_values", # how many values were collected during the process
     "tasks_assigned", 
     "efficiency_per_task", # power in watt per task
     "efficiency", # inverted eff
@@ -147,6 +149,8 @@ def end_task_session(client_id, end_time):
     new_data = pd.DataFrame([{
        "client_id": client_id,
        "total_power_usage": total_power,
+       "relevant_power_values": relevant_power_values,
+       "num_of_power_values": len(relevant_power_values),
        "tasks_assigned": total_tasks,
        "efficiency_per_task": efficiency_per_task,
        "efficiency": inv_efficiency,
@@ -161,6 +165,54 @@ def end_task_session(client_id, end_time):
     # Empty memory for the next measurement
     del power_tracking[client_id]
     del task_count[client_id]
+
+
+def aggregate_last_n_entries(n=5):
+    """
+    Aggregates the last `n` entries of a client and creates a new line with summed and averaged values.
+    
+    Parameters:
+       n (int): The number of recent entries to be used. it should correspond to the number of connected clients
+    
+    Returns:
+       pd.DataFrame: A DataFrame with the aggregated new row.
+    """
+    global df_client_power
+
+    # Select the last `n` lines for the specified client
+    # last_n_entries = df_client_power[df_client_power["client_id"] == client_id].tail(n)
+    last_n_entries = df_client_power.tail(n)
+
+    if last_n_entries.empty:
+       # print(f"Found no last {n} entries for client {client_id}.")
+       print("No last entries found.")
+       return None  # return empty dataframe row
+
+    # calculate sums and means of the values
+    total_power = last_n_entries["total_power_usage"].sum()
+    total_tasks = last_n_entries["tasks_assigned"].sum()
+    total_duration = last_n_entries["total_duration"].sum()
+    total_power_values = last_n_entries["num_of_power_values"].sum()
+    
+    avg_efficiency_per_task = last_n_entries["efficiency_per_task"].mean()
+    avg_inv_efficiency = last_n_entries["efficiency"].mean()
+    avg_time_per_task = last_n_entries["time_per_task"].mean()
+    # avg_power_values = last_n_entries["num_of_power_values"].mean()
+
+    # create new df row with aggregated data
+    new_data = pd.DataFrame([{
+       "client_id": 0, # for all clients
+       "total_power_usage": total_power,
+       "relevant_power_values": [], # could be all values for every client together but i think thats not relevant
+       "num_of_power_values": total_power_values,
+       "tasks_assigned": total_tasks,
+       "efficiency_per_task": avg_efficiency_per_task, 
+       "efficiency": avg_inv_efficiency,
+       "total_duration": total_duration,
+       "time_per_task": avg_time_per_task
+    }])
+
+    df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
 
 # read tasks from file and populate task_listt
 def load_tasks_from_file():
@@ -270,7 +322,14 @@ def distribute_tasks_by_efficiency():
     # distribute tasks randomly, but based on efficiency
     # shuffle the tasks, create thresholds and then split the shuffled task list accordingly
     # size of sublists based on probabilities, i.e. more efficient clients get more tasks, but every client gets tasks
-    sublists = np.array_split(np.random.permutation(task_list), np.cumsum(probabilities[:-1]) * len(task_list))
+
+    # SMake sure that the indices are integers, so we can split the array on the indices (they are not floats)
+    # cummulative probabilities
+    indices = np.cumsum(probabilities[:-1]) * len(task_list)
+    indices = indices.astype(int)  # Umwandlung in Ganzzahlen
+
+    sublists = np.array_split(np.random.permutation(task_list), indices)
+    # sublists = np.array_split(np.random.permutation(task_list), np.cumsum(probabilities[:-1]) * len(task_list))
 
     # Save the sorting of the clients with their efficiencies in the df
     iteration = len(df_client_efficiency) + 1  # increase iteration for each new distrib
@@ -440,6 +499,9 @@ def on_message(client, userdata, msg):
         if finisher_counter == len(connected_clients):
             print(f"All tasks have been processed: done_tasks = {finisher_counter}, init_tasks {task_num}")
             client.publish("start_stop/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
+
+            # change the n when more clients are connected!!!!
+            aggregate_last_n_entries(1)
 
             # Log directory for results
             project_root = os.getcwd()  # main directory
