@@ -61,11 +61,11 @@ def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
 
 def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
-    scenarios = [
-        "apply_annSolution",
-        "create_annSolution",
-        "refine_annSolution",
-    ]
+    # scenarios = [
+    #     "apply_annSolution",
+    #     "create_annSolution",
+    #     "refine_annSolution",
+    # ]
 
     # fet bases from the directory
     all_bases = get_bases.get_bases()
@@ -93,50 +93,51 @@ def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="use
 
     tasks = []
     for _ in range(number_of_tasks):
-        scenario = random.choice(scenarios)
-        if scenario == "apply_annSolution":
-            task = f"mosquitto_pub " \
-                f"-h {host} " \
-                f"-p 1883 " \
-                f"-t \"{MQTT_topic}\" "\
-                f"-u {MQTT_Username} " \
-                f"-P {MQTT_Password} " \
-                f'-m "Please realize the following AI case: ' \
-                f"scenario={scenario}, " \
-                f"knowledge_base={random.choice(knowledge_base)}, " \
-                f"activation_base={random.choice(activation_base)}, " \
-                f"code_base={code_base}, " \
-                f"learning_base=-, " #\
-                # f"sender={sender}, " \
-                # f"receiver={receiver}\" "
-        elif scenario == "create_annSolution":
-            task = f"mosquitto_pub " \
-                f"-h {host} " \
-                f"-p 1883 " \
-                f"-t \"{MQTT_topic}\" "\
-                f"-u {MQTT_Username} " \
-                f"-P {MQTT_Password} " \
-                f'-m "Please realize the following AI case: ' \
-                f"scenario={scenario}, " \
-                f"knowledge_base=-, " \
-                f"activation_base=-, " \
-                f"code_base={code_base}, " \
-                f"learning_base={random.choice(learning_base)}, " #\
-                # f"sender={sender}, " \
-                # f"receiver={receiver}\" "
-        elif scenario == "refine_annSolution":
-            task = f"mosquitto_pub " \
-                f"-h {host} " \
-                f"-p 1883 " \
-                f"-t \"{MQTT_topic}\" "\
-                f"-u {MQTT_Username} " \
-                f"-P {MQTT_Password} " \
-                f'-m "Please realize the following AI case: ' \
-                f"scenario={scenario}, " \
-                f"knowledge_base={random.choice(knowledge_base)}, " \
-                f"activation_base=-, " \
-                f"code_base={code_base}, " \
-                f"learning_base={random.choice(learning_base)}, " # \
+        # scenario = random.choice(scenarios)
+        scenario = "apply_annSolution"
+        # if scenario == "apply_annSolution":
+        task = f"mosquitto_pub " \
+            f"-h {host} " \
+            f"-p 1883 " \
+            f"-t \"{MQTT_topic}\" "\
+            f"-u {MQTT_Username} " \
+            f"-P {MQTT_Password} " \
+            f'-m "Please realize the following AI case: ' \
+            f"scenario={scenario}, " \
+            f"knowledge_base={random.choice(knowledge_base)}, " \
+            f"activation_base={random.choice(activation_base)}, " \
+            f"code_base={code_base}, " \
+            f"learning_base=-, " #\
+            # f"sender={sender}, " \
+            # f"receiver={receiver}\" "
+        # elif scenario == "create_annSolution":
+        #     task = f"mosquitto_pub " \
+        #         f"-h {host} " \
+        #         f"-p 1883 " \
+        #         f"-t \"{MQTT_topic}\" "\
+        #         f"-u {MQTT_Username} " \
+        #         f"-P {MQTT_Password} " \
+        #         f'-m "Please realize the following AI case: ' \
+        #         f"scenario={scenario}, " \
+        #         f"knowledge_base=-, " \
+        #         f"activation_base=-, " \
+        #         f"code_base={code_base}, " \
+        #         f"learning_base={random.choice(learning_base)}, " #\
+        #         # f"sender={sender}, " \
+        #         # f"receiver={receiver}\" "
+        # elif scenario == "refine_annSolution":
+        #     task = f"mosquitto_pub " \
+        #         f"-h {host} " \
+        #         f"-p 1883 " \
+        #         f"-t \"{MQTT_topic}\" "\
+        #         f"-u {MQTT_Username} " \
+        #         f"-P {MQTT_Password} " \
+        #         f'-m "Please realize the following AI case: ' \
+        #         f"scenario={scenario}, " \
+        #         f"knowledge_base={random.choice(knowledge_base)}, " \
+        #         f"activation_base=-, " \
+        #         f"code_base={code_base}, " \
+        #         f"learning_base={random.choice(learning_base)}, " # \
                 # "sender={sender}, " \
                 # f"receiver={receiver}\" "
         # elif scenario == "wire_annSolution":

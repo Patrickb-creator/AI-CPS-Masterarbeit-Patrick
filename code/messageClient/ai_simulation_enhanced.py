@@ -46,9 +46,9 @@ pc_name = "LenasPC"
 hostArch = platform.machine()
 
 # Log directory for task results
-project_root = os.getcwd()  # Hauptverzeichnis
+project_root = os.getcwd()  # Main directory
 
-# verzeichnis anpassen an windows oder an linux je nachdem wo es läuft 
+# adapt directory to windows or linux depending on where it is running 
 log_directory = os.path.join(project_root, "code/messageClient/task_logs")
 if not os.path.exists(log_directory):
     os.makedirs(log_directory, exist_ok=True)
@@ -100,13 +100,13 @@ def get_or_generate_client_id():
 # get the local IP address of the device
 def get_local_ip():
     try:
-        # Verbindung zu einer nicht existierenden Adresse (um das Netzwerkinterface zu bestimmen)
+        # connect to a non-existent address (to determine the network interface)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))  # 8.8.8.8 ist ein öffentlicher DNS-Server von Google
             ip_address = s.getsockname()[0]  # get ip of the device
         return ip_address
     except Exception as e:
-        print(f"Fehler beim Abrufen der IP-Adresse: {e}")
+        print(f"Error when retrieving the IP address: {e}")
         return None
 
 # get local ip
@@ -115,16 +115,16 @@ print(f"Lokale IP-Adresse: {local_ip}")
 
 # get the latest broker ip of the brokedr which was started
 def get_broker_ip_via_file():
-    # Der aktuelle Ordner, in dem sich der ausführende Code befindet
+    # The current folder in which the executing code is located
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Gehe zum Überordner "code"
+    # Go to the “code” parent folder
     parent_dir = os.path.dirname(current_dir)
 
-    # Konstruktiere den Pfad zum Ordner "messageBroker"
+    # Construct the path to the “messageBroker” folder
     broker_dir = os.path.join(parent_dir, "messageBroker")
 
-    # Der vollständige Pfad zur Datei "broker_ip_log.txt"
+    # The full path to the “broker_ip_log.txt” file
     ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
 
     try:
@@ -264,6 +264,7 @@ def task_worker():
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             completion_message = f"[{timestamp}] I processed all tasks.\n"
             client.publish("result/status/" + client_id, 0)
+            client.publish("finish/" + client_id, f"Finished {client_id}")
             print(completion_message)
 
 # The callback for when a PUBLISH message is received from the server.

@@ -5,9 +5,12 @@ import sys
 import time
 import threading
 import random
+import pandas as pd
+import numpy as np
+import json
 from collections import defaultdict
 
-# Add the parent directory (where "taskGenerator" is) to the Python path
+# add the parent directory (where "taskGenerator" is) to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
@@ -28,15 +31,38 @@ connected_clients = set()  # unique set of connected PCs
 ping_event = threading.Event()  # event to control ping threads
 stop_event = threading.Event()
 task_event = threading.Event()
-message_count = 0  # counter for received messages on results topic
-task_count = 0  # counter for loaded tasks
-# "Zeitstempel_Aufgabenanzahl_TM.txt"
+
+finisher_counter = 0  # counter for received messages on results topic
+task_num = 0  # counter for loaded tasks
+
 timestamp_file = None
 log_lock = threading.Lock() # ensure logging 
+write_to_power_log_lock = threading.Lock()
 
 # global task list
 task_list = []
 task_lock = threading.Lock()  # ensure thread-safe access to task_list
+
+client_status = defaultdict(int)  # 1: task distributed, 0: tasks completed
+
+# cache for current measured values per client
+power_tracking = defaultdict(list)  # Stores all measured power values per client
+task_count = defaultdict(int)   # Stores how many tasks a client has received
+
+# Cache for start and end time per Client and Batch
+task_timing = defaultdict(list)  
+
+# Create an empty DataFrame to store the consumption data
+columns = [
+   "client_id", 
+   "total_power_usage", 
+   "tasks_assigned", 
+   "efficiency_per_task", # power in watt per task
+   "efficiency", # inverted eff
+   "total_duration", 
+   "time_per_task"]
+
+df_client_power = pd.DataFrame(columns=columns)
 
 # get the latest broker ip of the broker which was started
 def get_broker_ip_via_file():
@@ -50,11 +76,80 @@ def get_broker_ip_via_file():
    except FileNotFoundError:
       print(f"File {ip_file} not found")
 
-# function to read tasks from file and populate task_list
+def assign_task(client_id):
+   """Increases the task counter for a client"""
+   task_count[client_id] += 1
+
+def start_task_session(client_id):
+   """Initializes a new measurement series for a client"""
+   power_tracking[client_id] = []  # Empty list for measured current values
+   task_count[client_id] = 0  # reset task number
+   task_timing[client_id].append({"start_time": time.time()})  # save start time
+
+def record_power_usage(client_id, power_value):
+   """Saves individual power consumption values during processing"""
+   if client_id in task_timing and task_timing[client_id]:  # start task
+      power_tracking[client_id].append((time.time(), power_value))  # save time stamps
+
+def end_task_session(client_id, end_time):
+   """Called when a client reports that it is ready"""
+   global df_client_power
+
+   if client_id not in power_tracking:
+      print(f"⚠️ No Power-Tracking for {client_id} found!")
+      return
+
+   start_time = task_timing[client_id][-1]["start_time"]  # get start time
+
+   # just for debugging
+   local_time = time.localtime(start_time)
+   formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
+   local_time_2 = time.localtime(end_time)
+   formatted_time_2 = time.strftime("%Y-%m-%d %H:%M:%S", local_time_2)
+
+   # Only add up values within the time window
+   relevant_power_values = [
+      power for timestamp, power in power_tracking[client_id] 
+      if start_time <= timestamp <= end_time
+   ]
+
+   total_power = sum(relevant_power_values)  # Sum only relevant values
+   total_tasks = task_count.get(client_id, 0)  
+   inv_efficiency = total_tasks / total_power if total_power > 0 else 0  
+   efficiency_per_task = total_power / total_tasks
+
+   # is in seconds because time is in epoch, this Unix timestamp
+   total_duration = end_time - start_time  
+   time_per_task = total_duration / total_tasks if total_tasks > 0 else 0  
+   
+   # add new data to dataframe
+   new_data = pd.DataFrame([{
+      "client_id": client_id,
+      "total_power_usage": total_power,
+      "tasks_assigned": total_tasks,
+      "efficiency_per_task": efficiency_per_task,
+      "efficiency": inv_efficiency,
+      "total_duration": total_duration,
+      "time_per_task": time_per_task
+   }])
+
+   df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+
+   print(f"✅ Save Data for {client_id}: {new_data.to_dict(orient='records')}")
+
+   # Empty memory for the next measurement
+   del power_tracking[client_id]
+   del task_count[client_id]
+
+# read tasks from file and populate task_list
 def load_tasks_from_file():
    global task_list
    global task_count
    global timestamp_file
+   global finisher_counter
+   global task_num
+
+   finisher_counter = 0
 
    generator_dir = os.path.join(parent_dir, "taskGenerator")
    manager_dir = os.path.join(parent_dir, "taskManager")
@@ -65,18 +160,18 @@ def load_tasks_from_file():
       os.makedirs(log_directory)
 
    # change this if you use different generators!!
-   task_file = os.path.join(generator_dir, "exact_distribution_generated_tasks.txt")
+   task_file = os.path.join(generator_dir, "generated_tasks.txt")
 
    try:
       with open(task_file, 'r', encoding='utf-8') as file:
          with task_lock:
             # load tasks from file that was generated by task_generator
             loaded_tasks = [line.strip() for line in file.readlines() if line.strip()]
-            task_count = len(loaded_tasks)
+            task_num = len(loaded_tasks)
 
             # set path for timestamp_file
             timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
-            timestamp_file = os.path.join(log_directory, f"{timestamp}_{task_count}_TM.txt")
+            timestamp_file = os.path.join(log_directory, f"{timestamp}_{task_num}_TM.txt")
 
             # extend every task with sender and random receiver -> only for random distribution
             task_list = [
@@ -88,14 +183,14 @@ def load_tasks_from_file():
       print(f"File {task_file} not found Error loading tasks:{e}.")
 
 def find_receiver(task):
-   # Regulärer Ausdruck, um den receiver-Wert zu extrahieren
+   # Regular expression to extract the receiver value
    match = re.search(r'receiver=([^\s,]+)', task)
-   # Wenn ein Treffer gefunden wird, den receiver ausgeben
+   # If a hit is found, output the receiver
    if match:
-         receiver = match.group(1).rstrip('"')
-         return receiver
+      receiver = match.group(1).rstrip('"')
+      return receiver
    else:
-         print("No receiver found")
+      print("No receiver found")
 
 # distrbute available tasks randomly to the connected clients
 # the ❤️ of the distribution!!!!!
@@ -139,15 +234,17 @@ def distribute_tasks(client):
                   i += 1
 
             number_of_tasks = len(combined_tasks)
-            log_event(f"{number_of_tasks} tasks for {target_client}")
+            # log_event(f"{number_of_tasks} tasks for {target_client}")
 
             # combine all tasks for the receiver into one string to send them together
             task_string = "\n".join(combined_tasks)
+            task_count[target_client] = len(combined_tasks) # Erhöht den Task-Zähler für einen Client
 
             # check if the target client is connected and then send task to the right client
             if target_client in connected_clients:
                client.publish("start_stop/taskWorker", 1, qos=1) # status=1 cause it starts to distribute tasks
                client.publish(f"tasks/{target_client}", task_string, qos=1)
+               start_task_session(target_client) #  init a new measurement series for the client
                print(f"Sent {number_of_tasks} tasks to {target_client}.")
             else:
                print(f"Target client {target_client} is not connected. Skipping.")
@@ -204,38 +301,104 @@ def on_connect(client, userdata, flags, rc):
    client.subscribe("status/#") # subscribe to the status of all clients to monitor who is connected
    client.subscribe("ping/response/#") # listen for ping responses
    client.subscribe(MQTT_Task_Generator_Topic, qos=0) # listen to the task_generator
+   client.subscribe("ShellyVerbrauch/#")  # Subscribe to all Shelly power topics
+   client.subscribe("finish/#")
 
-def log_event(event):
-   global timestamp_file
-   if timestamp_file is None:
-      print("Error: Timestamp file path is not set. Please load tasks first.")
-      return
+# def log_event(event):
+#    global timestamp_file
+#    if timestamp_file is None:
+#       print("Error: Timestamp file path is not set. Please load tasks first.")
+#       return
 
-   timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-   log_entry = f"[{timestamp}] {event}\n"
-   print(log_entry, end="")
+#    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+#    log_entry = f"[{timestamp}] {event}\n"
+#    print(log_entry, end="")
 
-   try:
-      with open(timestamp_file, "a", encoding="utf-8") as file:
-         file.write(log_entry)
-   except Exception as e:
-      print(f"Error in logging event: {e}")
+#    try:
+#       with open(timestamp_file, "a", encoding="utf-8") as file:
+#          file.write(log_entry)
+#    except Exception as e:
+#       print(f"Error in logging event: {e}")
+
+def get_shelly_apower_data(topic, message):
+   # Parse the client ID from the topic
+   client_id_json = topic.split("/")[1]
+
+   if client_id_json in connected_clients:
+      try:
+         power_reading = json.loads(message)
+         # Check whether the message actually contains performance data
+         if message == "true" or message == "false":
+            print(f"ℹ️ Message received without performance data: {message}")
+         elif "params" in power_reading:
+               params = power_reading["params"]
+               
+               if "switch:0" in params:
+                  actual_power = params["switch:0"].get("apower")
+      
+                  if actual_power is not None:
+                     record_power_usage(client_id_json, actual_power)
+                     print(f"🔹 {client_id_json}: {actual_power} W")
+                  else:
+                     print(f"⚠️ No 'apower' data for {client_id_json}!")
+               else:
+                  print(f"ℹ️ 'params' available, but no 'switch:0': {message}")
+         else:
+               print(f"ℹ️ Messagge without 'params': {message}")     
+      except json.JSONDecodeError:
+            print(f"⚠️ Error parsing the JSON message: {message}")
+      except Exception as e:
+            print(f"⚠️ Unexpected error when processing {topic}: {e}")
 
 # callback when receiving messages
 def on_message(client, userdata, msg):
    global task_list
-   global message_count
+   global task_count
+   global finisher_counter
+   global task_num
+
    message = msg.payload.decode()
    topic = msg.topic
 
    print(f"Message received on {msg.topic}: {message}")
 
    # count messages on the results topic
-   if topic == MQTT_Result_Topic:
-      message_count += 1
-      if message_count == task_count and task_count > 0:
-         log_event(f"All tasks have been processed: done_tasks = {message_count}, init_tasks {task_count}")
+   # Check if the client finished the task
+   if topic.startswith("finish/"):
+      finisher_counter += 1
+      if message.startswith("Finished"):
+            finished_client = message.split(" ")[1]  # Assuming the message is something like "Finished ClientName"
+            client_status[finished_client] = 0  # Set status to 0 (tasks completed)
+            end_time = time.time()
+            end_task_session(finished_client, end_time)
+            # Save the collected power data for the finished client
+            # if finished_client in power_tracking:
+            #     client_power_summary[finished_client].extend(power_tracking[finished_client])
+            #     print(f"Summed power usage for {finished_client}: {client_power_summary[finished_client]} W")
+            #     power_tracking[finished_client] = []  # Reset for the next task
+      if finisher_counter == len(connected_clients):
+         print(f"All tasks have been processed: done_tasks = {finisher_counter}, init_tasks {task_num}")
          client.publish("start_stop/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
+         
+         # Log directory for results
+         project_root = os.getcwd()  # Hauptverzeichnis
+
+         # adapt directory to windows or linux depending on where it is running 
+         log_directory_power = r"C:\Users\lenag\Documents\power-logs-random_thesis"
+         
+         if not os.path.exists(log_directory_power):
+            os.makedirs(log_directory_power, exist_ok=True)
+         
+         # print data to the csv file for doku
+         timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
+
+         file = f"{timestamp}_power-log-random_{task_num}.csv"
+         file_path = os.path.join(log_directory_power, file)
+         print("Printing Power Data so CSV in Path:" + file_path)
+
+         with write_to_power_log_lock:
+            file = df_client_power.to_csv(file_path, index=False, encoding="utf-8")
+            print("created file")
 
    # check for status messages
    if topic.startswith("status/"):
@@ -247,14 +410,15 @@ def on_message(client, userdata, msg):
    # check for ping answers
    elif topic.startswith("ping/response/"):
       client_name = topic.split("/")[-1]
-      connected_clients.add(client_name)
+      connected_clients.add(client_name) #TODO do i need that
       # client_ping_timestamps[client_name] = time.time()  # set timestamp to now
-        
-
-   # extract clients which introduce themselves
+   # extract task_gen messages
    elif topic.startswith("task_generator"):
       print("Task generator triggered. Loading tasks...")
       load_tasks_from_file()
+   # Handle power data from Shelly devices
+   elif topic.startswith("ShellyVerbrauch/") and "events" in topic and "rpc" in topic:
+      get_shelly_apower_data(topic, message)
 
    match = re.search(r"My name is (\w+)", message)
    if match:
@@ -263,7 +427,6 @@ def on_message(client, userdata, msg):
 
 if __name__ == '__main__':
    client = mqtt.Client()
-
    client.on_connect = on_connect
    client.on_message = on_message
    client.username_pw_set(username=MQTT_Username, password=MQTT_Password)
@@ -277,7 +440,8 @@ if __name__ == '__main__':
    try:
       # connect to MQTT broker
       client.connect(MQTT_Broker, Broker_Port)
-
+      client.enable_logger()
+      
       # start ping, monitoring and tasks thread
       ping_thread = threading.Thread(target=send_ping, args=(client,))
       monitor_thread = threading.Thread(target=monitor_clients)
@@ -297,7 +461,8 @@ if __name__ == '__main__':
 
    except KeyboardInterrupt:
       print("Keyboard interrupt detected. Exiting gracefully...")
-
+   except Exception as e:
+      print("Caught Exception " + e)
    finally:
       ping_event.set()
       stop_event.set()
