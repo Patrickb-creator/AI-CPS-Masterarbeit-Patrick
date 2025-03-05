@@ -23,12 +23,13 @@ from messageClient import mqtt_broker_listener
 from taskGenerator import get_bases
 
 # MQTT-config
-global MQTT_Publish_Topic, MQTT_Result_Topic, MQTT_Username, MQTT_Password
+global MQTT_Publish_Topic, MQTT_Result_Topic, MQTT_Username, MQTT_Password, MQTT_Broker
 
 MQTT_Port = 1883
 MQTT_Username = "user1"
 MQTT_Password = "WhHe1NPfDBJ%"
 MQTT_Task_Generator_Topic = "task_generator"
+MQTT_Broker = "localhost"
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -59,8 +60,19 @@ def get_broker_ip_via_file():
 
 def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
+    client.subscribe("tasks_done")
 
-def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
+def on_message(client, userdata, msg):
+    # global MQTT_Broker 
+    message = msg.payload.decode()
+    topic = msg.topic
+
+    if topic == "tasks_done":
+        # change num of tasks if you need more
+        task_generator(number_of_tasks=10, MQTT_topic="mqttTester", host=MQTT_Broker, client=client)
+
+
+def task_generator(number_of_tasks, MQTT_topic, host, client, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
     # scenarios = [
     #     "apply_annSolution",
     #     "create_annSolution",
@@ -170,11 +182,11 @@ def task_generator(number_of_tasks, MQTT_topic, client, host, MQTT_Username="use
     client.publish(MQTT_Task_Generator_Topic, f"{number_of_tasks} new tasks generated", qos=1)
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
 
-
 def main():
     # initialize MQTT-Client
     client = mqtt.Client()
     client.on_connect = on_connect
+    client.on_message = on_message
     client.username_pw_set(MQTT_Username, MQTT_Password)
 
     # get the broker ip from the mDNS
@@ -192,26 +204,38 @@ def main():
     # - Method 1 - connect via plain MQTT protocol
     client.connect(MQTT_Broker, Broker_Port)
 
-    client.loop_start()
+    # for the first triggering the user has to start one tg by himself 
+    # after that the tg is waiting for done messages from the task manager
+    user_input = input("Start the Task Generating Process? (Enter 'y' to start or 'exit' to quit): ")
+    if user_input.lower() == "y":
+        print("Starting the task generating process")
+        task_generator(10, "mqttTester", host=MQTT_Broker, client=client)
+    elif user_input.lower() == "exit":
+        client.disconnect()
+        sys.exit(0)
+    else:
+        print("no correct input, try again.")
 
-    while True:
-        try:
-            user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
-            if user_input.lower() == "exit":
-                print("Exiting Task Generator.")
-                break
+    client.loop_forever()
 
-            number_of_tasks = int(user_input)
-            if number_of_tasks <= 0:
-                print("Please enter a positive number.")
-                continue
+    # while True:
+    #     try:
+    #         user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
+    #         if user_input.lower() == "exit":
+    #             print("Exiting Task Generator.")
+    #             break
 
-            task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
-        except ValueError:
-            print("Invalid input. Please enter a valid number.")
+    #         number_of_tasks = int(user_input)
+    #         if number_of_tasks <= 0:
+    #             print("Please enter a positive number.")
+    #             continue
 
-    client.loop_stop()
-    client.disconnect()
+    #         task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
+    #     except ValueError:
+    #         print("Invalid input. Please enter a valid number.")
+
+    # client.loop_stop()
+    # client.disconnect()
 
 if __name__ == "__main__":
     main()

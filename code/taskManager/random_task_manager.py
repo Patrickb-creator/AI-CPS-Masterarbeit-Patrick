@@ -430,6 +430,7 @@ def on_message(client, userdata, msg):
       if finisher_counter == len(connected_clients):
          print(f"All tasks have been processed: done_tasks = {finisher_counter}, init_tasks {task_num}")
          client.publish("start_stop/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
+         client.publish("tasks_done", "done", qos=1) # publish message to tg to trigger new task batch
          
          # change the n when more clients are connected!!
          aggregate_last_n_entries(1)
