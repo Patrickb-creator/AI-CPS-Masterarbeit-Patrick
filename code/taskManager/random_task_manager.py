@@ -25,10 +25,11 @@ MQTT_Publish_Topic = "mqttTester"
 MQTT_Result_Topic = "mqttTester/results"
 MQTT_Task_Generator_Topic = "task_generator"
 connected_clients = set()  # unique set of connected PCs
+clients_with_tasks = 0
 
 # add timestamps for the latest pings to the clients
 # client_ping_timestamps = {}
-ping_event = threading.Event()  # event to control ping threads
+# ping_event = threading.Event()  # event to control ping threads
 stop_event = threading.Event()
 task_event = threading.Event()
 
@@ -56,6 +57,9 @@ task_timing = defaultdict(list)
 columns = [
    "client_id", 
    "total_power_usage", 
+   "avg_power_per_second",
+   "avg_power_per_minute",
+   "kwh",
    "relevant_power_values",
    "num_of_power_values", # how many values were collected during the process
    "tasks_assigned", 
@@ -115,19 +119,26 @@ def end_task_session(client_id, end_time):
       if start_time <= timestamp <= end_time
    ]
 
+   # is in seconds because time is in epoch, this Unix timestamp
+   total_duration = end_time - start_time  
+
    total_power = sum(relevant_power_values)  # Sum only relevant values
+   avg_power_per_second = total_power / total_duration # power per second in watts
+   avg_power_per_minute = avg_power_per_second * 60 # einheit in wattsekunden
+   kwh = avg_power_per_minute / 3600000 # kwh pro client -> danach dann verteilen, immer an den mehr aufgaben, der am ende weniger kwh verbraucht hat
    total_tasks = task_count.get(client_id, 0)  
    inv_efficiency = total_tasks / total_power if total_power > 0 else 0  
    efficiency_per_task = total_power / total_tasks
-
-   # is in seconds because time is in epoch, this Unix timestamp
-   total_duration = end_time - start_time  
+   
    time_per_task = total_duration / total_tasks if total_tasks > 0 else 0  
    
    # add new data to dataframe
    new_data = pd.DataFrame([{
       "client_id": client_id,
       "total_power_usage": total_power,
+      "avg_power_per_second": avg_power_per_second, # energieverbrauch pro sekunde für diesen einen lauf
+      "avg_power_per_minute": avg_power_per_minute, # für diesen einen lauf
+      "kwh": kwh, # für diesen einen lauf 
       "relevant_power_values": relevant_power_values,
       "num_of_power_values": len(relevant_power_values), 
       "tasks_assigned": total_tasks,
@@ -171,6 +182,9 @@ def aggregate_last_n_entries(n=5):
    total_tasks = last_n_entries["tasks_assigned"].sum()
    total_duration = last_n_entries["total_duration"].sum()
    total_power_values = last_n_entries["num_of_power_values"].sum()
+   total_avg_power_per_second = last_n_entries["avg_power_per_second"].sum() # power per second in watts
+   total_avg_power_per_minute = last_n_entries["avg_power_per_minute"].sum() # einheit in wattsekunden
+   total_kwh = last_n_entries["kwh"].sum() # kwh summiert für das gesamte Netzwerk -> danach dann verteilen, immer an den mehr aufgaben, der am ende weniger kwh verbraucht hat
    
    avg_efficiency_per_task = last_n_entries["efficiency_per_task"].mean()
    avg_inv_efficiency = last_n_entries["efficiency"].mean()
@@ -181,6 +195,9 @@ def aggregate_last_n_entries(n=5):
    new_data = pd.DataFrame([{
       "client_id": 0, # for all clients
       "total_power_usage": total_power,
+      "avg_power_per_second": total_avg_power_per_second,
+      "avg_power_per_minute": total_avg_power_per_minute,
+      "kwh": total_kwh,
       "relevant_power_values": [], # could be all values for every client together but i think thats not relevant
       "num_of_power_values": total_power_values,
       "tasks_assigned": total_tasks,
@@ -198,9 +215,11 @@ def load_tasks_from_file():
    global task_count
    global timestamp_file
    global finisher_counter
+   global clients_with_tasks
    global task_num
 
    finisher_counter = 0
+   clients_with_tasks = 0
 
    generator_dir = os.path.join(parent_dir, "taskGenerator")
    manager_dir = os.path.join(parent_dir, "taskManager")
@@ -229,7 +248,7 @@ def load_tasks_from_file():
                f"{task} sender={client_id}, receiver={random.choice(list(connected_clients))}\""
                for task in loaded_tasks
             ]
-      print(f"Loaded tasks: {task_list}")
+      print(f"Loaded tasks.")
    except Exception as e:
       print(f"File {task_file} not found Error loading tasks:{e}.")
 
@@ -247,6 +266,8 @@ def find_receiver(task):
 # the ❤️ of the distribution!!!!!
 def distribute_tasks(client):
    global task_list
+   global clients_with_tasks
+   global task_count
 
    while not stop_event.is_set():
       if not connected_clients:
@@ -297,17 +318,17 @@ def distribute_tasks(client):
                start_task_session(target_client) #  init a new measurement series for the client
                print(f"Sent {number_of_tasks} tasks to {target_client}.")
                task_count[target_client] = number_of_tasks # set task counter
+               clients_with_tasks += 1 # one client more who got tasks
             else:
                print(f"Target client {target_client} is not connected. Skipping.")
-
             time.sleep(2) # small delay to avoid overwhelming mqtt
 
 # send pings to clients
-def send_ping(client):
-   while not stop_event.is_set():
-      ping_event.wait()  # wait until event starts
-      client.publish("ping/request", "Ping from TaskManager", qos=1)
-      time.sleep(10)
+# def send_ping(client):
+#    while not stop_event.is_set():
+#       ping_event.wait()  # wait until event starts
+#       client.publish("ping/request", "Ping from TaskManager", qos=1)
+#       time.sleep(10)
 
 
 # remove inactive clients from connected_clients list
@@ -329,16 +350,15 @@ def send_ping(client):
 
 # monitor active clients
 def monitor_clients():
-   global ping_event
-
+   # global ping_event
    while not stop_event.is_set():
       print(f"Active clients: {connected_clients}")
-      if connected_clients and not ping_event.is_set():
-         print("Clients connected. Resuming ping...")
-         ping_event.set()  # activate ping
-      elif not connected_clients and ping_event.is_set():
-         print("No clients connected. Pausing ping...")
-         ping_event.clear()  # pause ping
+      # if connected_clients and not ping_event.is_set():
+      #    print("Clients connected. Resuming ping...")
+      #    ping_event.set()  # activate ping
+      # elif not connected_clients and ping_event.is_set():
+      #    print("No clients connected. Pausing ping...")
+      #    ping_event.clear()  # pause ping
       time.sleep(10)
 
 # callback function for mqtt connection
@@ -350,8 +370,8 @@ def on_connect(client, userdata, flags, rc):
    client.subscribe(MQTT_Publish_Topic, qos=0) # channel to deal with tasks
    client.subscribe(MQTT_Result_Topic, qos=0)
    client.subscribe("status/#") # subscribe to the status of all clients to monitor who is connected
-   client.subscribe("ping/response/#") # listen for ping responses
-   client.subscribe(MQTT_Task_Generator_Topic, qos=0) # listen to the task_generator
+   # client.subscribe("ping/response/#") # listen for ping responses
+   client.subscribe("task_generator", qos=1) # listen to the task_generator
    client.subscribe("ShellyVerbrauch/#")  # Subscribe to all Shelly power topics
    client.subscribe("finish/#")
 
@@ -371,7 +391,34 @@ def on_connect(client, userdata, flags, rc):
 #    except Exception as e:
 #       print(f"Error in logging event: {e}")
 
-def get_shelly_apower_data(topic, message):
+def get_shelly_apower_data_status_switch(topic, message):
+   # Parse the client ID from the topic
+   client_id_json = topic.split("/")[1]
+
+   if client_id_json in connected_clients:
+      try:
+         power_reading = json.loads(message)
+         # Check whether the message actually contains performance data
+         if message == "true" or message == "false":
+            print(f"ℹ️ Message received without performance data: {message}")
+         elif "apower" in power_reading:
+            actual_power = power_reading["apower"]
+   
+            if actual_power is not None:
+               record_power_usage(client_id_json, actual_power)
+               print(f"🔹 {client_id_json}: {actual_power} W")
+            else:
+               print(f"⚠️ No 'apower' data for {client_id_json}!")
+               # else:
+               #    print(f"ℹ️ 'params' available, but no 'switch:0': {message}")
+         else:
+               print(f"ℹ️ Messagge without 'params': {message}")     
+      except json.JSONDecodeError:
+            print(f"⚠️ Error parsing the JSON message: {message}")
+      except Exception as e:
+            print(f"⚠️ Unexpected error when processing {topic}: {e}")
+
+def get_shelly_apower_data_events(topic, message):
    # Parse the client ID from the topic
    client_id_json = topic.split("/")[1]
 
@@ -395,7 +442,7 @@ def get_shelly_apower_data(topic, message):
                else:
                   print(f"ℹ️ 'params' available, but no 'switch:0': {message}")
          else:
-               print(f"ℹ️ Messagge without 'params': {message}")     
+            print(f"ℹ️ Messagge without 'params': {message}")     
       except json.JSONDecodeError:
             print(f"⚠️ Error parsing the JSON message: {message}")
       except Exception as e:
@@ -407,15 +454,18 @@ def on_message(client, userdata, msg):
    global task_count
    global finisher_counter
    global task_num
+   global clients_with_tasks
 
    message = msg.payload.decode()
    topic = msg.topic
 
-   print(f"Message received on {msg.topic}: {message}")
+   if not topic.startswith("ShellyVerbrauch"):
+      print(f"Message received on {msg.topic}: {message}")
 
    # count messages on the results topic
    # Check if the client finished the task
    if topic.startswith("finish/"):
+      # print("Anzahl der Clients mit Aufgaben:", clients_with_tasks)
       finisher_counter += 1
       if message.startswith("Finished"):
             finished_client = message.split(" ")[1]  # Assuming the message is something like "Finished ClientName"
@@ -427,7 +477,7 @@ def on_message(client, userdata, msg):
             #     client_power_summary[finished_client].extend(power_tracking[finished_client])
             #     print(f"Summed power usage for {finished_client}: {client_power_summary[finished_client]} W")
             #     power_tracking[finished_client] = []  # Reset for the next task
-      if finisher_counter == len(connected_clients):
+      if clients_with_tasks == finisher_counter:
          print(f"All tasks have been processed: done_tasks = {finisher_counter}, init_tasks {task_num}")
          client.publish("start_stop/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
          client.publish("tasks_done", "done", qos=1) # publish message to tg to trigger new task batch
@@ -463,17 +513,19 @@ def on_message(client, userdata, msg):
       elif "Connected" in message:
          connected_clients.add(client_name)
    # check for ping answers
-   elif topic.startswith("ping/response/"):
-      client_name = topic.split("/")[-1]
-      connected_clients.add(client_name) #TODO do i need that
+   # elif topic.startswith("ping/response/"):
+      # client_name = topic.split("/")[-1]
+      # connected_clients.add(client_name) #TODO do i need that
       # client_ping_timestamps[client_name] = time.time()  # set timestamp to now
    # extract task_gen messages
-   elif topic.startswith("task_generator"):
+   elif topic == "task_generator":
       print("Task generator triggered. Loading tasks...")
       load_tasks_from_file()
    # Handle power data from Shelly devices
-   elif topic.startswith("ShellyVerbrauch/") and "events" in topic and "rpc" in topic:
-      get_shelly_apower_data(topic, message)
+   elif topic.startswith("ShellyVerbrauch/") and "status" in topic and "switch:0" in topic:
+      get_shelly_apower_data_status_switch(topic, message)
+   elif topic.startswith("ShellyVerbrauch/") and "events" in topic:
+      get_shelly_apower_data_events(topic, message)
 
    match = re.search(r"My name is (\w+)", message)
    if match:
@@ -498,12 +550,12 @@ if __name__ == '__main__':
       client.enable_logger()
       
       # start ping, monitoring and tasks thread
-      ping_thread = threading.Thread(target=send_ping, args=(client,))
+      # ping_thread = threading.Thread(target=send_ping, args=(client,))
       monitor_thread = threading.Thread(target=monitor_clients)
       task_thread = threading.Thread(target=distribute_tasks, args=(client,))
       # remove_inactive_clients_thread = threading.Thread(target=remove_inactive_clients)
 
-      ping_thread.start()
+      # ping_thread.start()
       monitor_thread.start()
       task_thread.start()
       # remove_inactive_clients_thread.start()
@@ -519,7 +571,7 @@ if __name__ == '__main__':
    except Exception as e:
       print("Caught Exception " + e)
    finally:
-      ping_event.set()
+      # ping_event.set()
       stop_event.set()
       task_event.set()
       print("Set ping_event and stop_event to False.")
@@ -529,8 +581,8 @@ if __name__ == '__main__':
       print("Client disconnected.")
 
       # Join threads only if they are alive
-      if 'ping_thread' in locals() and ping_thread.is_alive():
-         ping_thread.join(timeout=5)
+      # if 'ping_thread' in locals() and ping_thread.is_alive():
+      #    ping_thread.join(timeout=5)
       if 'monitor_thread' in locals() and monitor_thread.is_alive():
          monitor_thread.join(timeout=5)
       if 'task_thread' in locals() and task_thread.is_alive():

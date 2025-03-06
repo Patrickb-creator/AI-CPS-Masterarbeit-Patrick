@@ -23,13 +23,15 @@ from messageClient import mqtt_broker_listener
 from taskGenerator import get_bases
 
 # MQTT-config
-global MQTT_Publish_Topic, MQTT_Result_Topic, MQTT_Username, MQTT_Password, MQTT_Broker
+global MQTT_Publish_Topic, MQTT_Result_Topic, MQTT_Username, MQTT_Password, MQTT_Broker, experiment_num_tracker
 
 MQTT_Port = 1883
 MQTT_Username = "user1"
 MQTT_Password = "WhHe1NPfDBJ%"
 MQTT_Task_Generator_Topic = "task_generator"
 MQTT_Broker = "localhost"
+
+experiment_num_tracker = 1
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -60,17 +62,22 @@ def get_broker_ip_via_file():
 
 def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT broker with result code {rc}")
-    client.subscribe("tasks_done")
+    client.subscribe("tasks_done", qos=1)
 
 def on_message(client, userdata, msg):
-    # global MQTT_Broker 
+    global experiment_num_tracker
+    global MQTT_Broker 
+
     message = msg.payload.decode()
     topic = msg.topic
-
-    if topic == "tasks_done":
-        # change num of tasks if you need more
-        task_generator(number_of_tasks=10, MQTT_topic="mqttTester", host=MQTT_Broker, client=client)
-
+    print(message)
+    # print("got message from tm")
+    # experiment num tracker höher setzen je nachdem wie oft die 10 Aufgaben verteilt werden sollen
+    #if topic == "tasks_done" and experiment_num_tracker < 5:
+    #    # change num of tasks if you need more
+    #    task_generator(number_of_tasks=2, MQTT_topic="mqttTester", host=MQTT_Broker, client=client)
+    #else:
+    #    print(f"Published {experiment_num_tracker} times x tasks.")
 
 def task_generator(number_of_tasks, MQTT_topic, host, client, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
     # scenarios = [
@@ -79,6 +86,8 @@ def task_generator(number_of_tasks, MQTT_topic, host, client, MQTT_Username="use
     #     "refine_annSolution",
     # ]
 
+    global experiment_num_tracker
+    
     # fet bases from the directory
     all_bases = get_bases.get_bases()
 
@@ -179,10 +188,14 @@ def task_generator(number_of_tasks, MQTT_topic, host, client, MQTT_Username="use
     print(f"{number_of_tasks} tasks were stored in {output_file}.")
 
     # publih a message to the Task Manager, that new Tasks where generated
-    client.publish(MQTT_Task_Generator_Topic, f"{number_of_tasks} new tasks generated", qos=1)
+    client.publish("task_generator", f"{number_of_tasks} new tasks generated", qos=1)
+    experiment_num_tracker += 1
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
 
 def main():
+    global experiment_num_tracker
+
+    experiment_num_tracker = 0
     # initialize MQTT-Client
     client = mqtt.Client()
     client.on_connect = on_connect
@@ -203,39 +216,40 @@ def main():
     # establish connection of client and server
     # - Method 1 - connect via plain MQTT protocol
     client.connect(MQTT_Broker, Broker_Port)
+    client.loop_start()
 
-    # for the first triggering the user has to start one tg by himself 
+    #for the first triggering the user has to start one tg by himself 
     # after that the tg is waiting for done messages from the task manager
-    user_input = input("Start the Task Generating Process? (Enter 'y' to start or 'exit' to quit): ")
-    if user_input.lower() == "y":
-        print("Starting the task generating process")
-        task_generator(10, "mqttTester", host=MQTT_Broker, client=client)
-    elif user_input.lower() == "exit":
-        client.disconnect()
-        sys.exit(0)
-    else:
-        print("no correct input, try again.")
+    # user_input = input("Start the Task Generating Process? (Enter 'y' to start or 'exit' to quit): ")
+    # if user_input.lower() == "y":
+    #     print("Starting the task generating process")
+    #     task_generator(number_of_tasks=2, MQTT_topic="mqttTester", host=MQTT_Broker, client=client)
+    # elif user_input.lower() == "exit":
+    #     print("Stopping MQTT client...")
+    #     client.loop_start()
+    #     client.disconnect()
+    #     sys.exit(0)
+    # else:
+    #     print("no correct input, try again.")
 
-    client.loop_forever()
+    # client.loop_forever()
 
-    # while True:
-    #     try:
-    #         user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
-    #         if user_input.lower() == "exit":
-    #             print("Exiting Task Generator.")
-    #             break
-
-    #         number_of_tasks = int(user_input)
-    #         if number_of_tasks <= 0:
-    #             print("Please enter a positive number.")
-    #             continue
-
-    #         task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
-    #     except ValueError:
-    #         print("Invalid input. Please enter a valid number.")
-
-    # client.loop_stop()
-    # client.disconnect()
+    while True:
+        try:
+            user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
+            if user_input.lower() == "exit":
+                print("Exiting Task Generator.")
+                break  
+            number_of_tasks = int(user_input)
+            if number_of_tasks <= 0:
+                print("Please enter a positive number.")
+                continue  
+            task_generator(number_of_tasks=number_of_tasks, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")    
+    
+    client.loop_stop()
+    client.disconnect()
 
 if __name__ == "__main__":
     main()

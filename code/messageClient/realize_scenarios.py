@@ -812,7 +812,8 @@ def run_docker_compose_sequential(sender, receiver, log_directory, log_to_file=T
      stdout_file = f"{log_directory}/{sender}_{timestamp}_stdout.txt"
      stderr_file = f"{log_directory}/{sender}_{timestamp}_stderr.txt"
 
-    # creation of log files, if user wants to have them
+    # TODO
+    # creation of log files, if user wants to have them, i think this can be removed here
      if log_to_file:
           stdout_stream = open(stdout_file, "wb")
           stderr_stream = open(stderr_file, "wb")
