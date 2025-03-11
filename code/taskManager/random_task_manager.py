@@ -27,6 +27,8 @@ MQTT_Task_Generator_Topic = "task_generator"
 connected_clients = set()  # unique set of connected PCs
 clients_with_tasks = 0
 
+start_distribution = time.time()
+
 # add timestamps for the latest pings to the clients
 # client_ping_timestamps = {}
 # ping_event = threading.Event()  # event to control ping threads
@@ -57,8 +59,6 @@ task_timing = defaultdict(list)
 columns = [
    "client_id", 
    "total_power_usage", 
-   "avg_power_per_second",
-   "avg_power_per_minute",
    "kwh",
    "relevant_power_values",
    "num_of_power_values", # how many values were collected during the process
@@ -69,6 +69,15 @@ columns = [
    "time_per_task"]
 
 df_client_power = pd.DataFrame(columns=columns)
+
+# this is needed when the client got no tasks
+client_ids = ["444626", "283436", "854514", "943099", "956975"] 
+idle_power_values = [11.359467455621296, 4.575, 11.315000000000001, 4.3625, 93.79655172413791]  # Idle Power Values -> you have to collect them beforehand
+
+df_idle_power = pd.DataFrame({
+    "client_id": client_ids,
+    "idle_power_value": idle_power_values
+})
 
 # get the latest broker ip of the broker which was started
 def get_broker_ip_via_file():
@@ -82,10 +91,6 @@ def get_broker_ip_via_file():
    except FileNotFoundError:
       print(f"File {ip_file} not found")
 
-def assign_task(client_id):
-   """Increases the task counter for a client"""
-   task_count[client_id] += 1
-
 def start_task_session(client_id):
    """Initializes a new measurement series for a client"""
    power_tracking[client_id] = []  # Empty list for measured current values
@@ -97,9 +102,19 @@ def record_power_usage(client_id, power_value):
    if client_id in task_timing and task_timing[client_id]:  # start task
       power_tracking[client_id].append((time.time(), power_value))  # save time stamps
 
+def get_historical_mean_power_all_clients():
+   average_last_avg_power = df_client_power.groupby("client_id")["avg_power"].mean()
+   return average_last_avg_power.to_dict()
+
+def get_historical_mean_power_one_client(client_id):
+   historical_power_values = get_historical_mean_power_all_clients()
+   return historical_power_values.get(client_id, None) # the avg of every avg_power_value for this client
+
 def end_task_session(client_id, end_time):
    """Called when a client reports that it is ready"""
    global df_client_power
+
+   avg_power = 0
 
    if client_id not in power_tracking:
       print(f"⚠️ No Power-Tracking for {client_id} found!")
@@ -107,43 +122,47 @@ def end_task_session(client_id, end_time):
 
    start_time = task_timing[client_id][-1]["start_time"]  # get start time
 
-   # just for debugging
-   local_time = time.localtime(start_time)
-   formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
-   local_time_2 = time.localtime(end_time)
-   formatted_time_2 = time.strftime("%Y-%m-%d %H:%M:%S", local_time_2)
-
    # Only add up values within the time window
    relevant_power_values = [
       power for timestamp, power in power_tracking[client_id] 
       if start_time <= timestamp <= end_time
    ]
 
+   if len(relevant_power_values) == 0:
+      # no values from shelly there
+      avg_power = get_historical_mean_power_one_client(client_id) # we take this when no power is provided so we at least get something..
+   else:
+      avg_power = np.mean(relevant_power_values)  # Durchschnittliche Leistung des Clients, mean wird genommen, weil manchmal einer und manchmal 30 Datenpunkte kommen
+   
+   # Power (watts) × time (seconds) → watt seconds (Ws)
+   # 1 kWh = 1,000 watts × 1 hour = 3,600,000 watt seconds (Ws)
+   # Therefore, we divide by 3,600,000 to get from Ws → kWh.
+   total_power_usage = avg_power * total_duration  # Total energy consumption in Ws
+   kwh = (avg_power * total_duration) / 3600000  # Conversion to kWh   
+
    # is in seconds because time is in epoch, this Unix timestamp
    total_duration = end_time - start_time  
-
-   total_power = sum(relevant_power_values)  # Sum only relevant values
-   avg_power_per_second = total_power / total_duration # power per second in watts
-   avg_power_per_minute = avg_power_per_second * 60 # einheit in wattsekunden
-   kwh = avg_power_per_minute / 3600000 # kwh pro client -> danach dann verteilen, immer an den mehr aufgaben, der am ende weniger kwh verbraucht hat
-   total_tasks = task_count.get(client_id, 0)  
-   inv_efficiency = total_tasks / total_power if total_power > 0 else 0  
-   efficiency_per_task = total_power / total_tasks
+   total_tasks = task_count.get(client_id, 0)
    
-   time_per_task = total_duration / total_tasks if total_tasks > 0 else 0  
+   # tasks per kWh
+   inv_efficiency = total_tasks / kwh if kwh > 0 else 0 # tasks per kWh (inv_efficiency) is betetr, wenn ich wissen will, wer am meisten aus der Energie rausholt.
+   #  I would rather use inv_efficiency (tasks per kWh) because it shows more clearly who has the highest productivity with the lowest energy consumption.
+
+   # kwh per task
+   efficiency_per_task = kwh / total_tasks if total_tasks > 0 else 0  # kWh per task (efficiency_per_task) ist gut, wenn ich wissen will, wer die geringste Energiemenge pro Task benötigt
+   time_per_task = total_duration / total_tasks if total_tasks > 0 else 0 
    
    # add new data to dataframe
    new_data = pd.DataFrame([{
       "client_id": client_id,
-      "total_power_usage": total_power,
-      "avg_power_per_second": avg_power_per_second, # energieverbrauch pro sekunde für diesen einen lauf
-      "avg_power_per_minute": avg_power_per_minute, # für diesen einen lauf
-      "kwh": kwh, # für diesen einen lauf 
+      "total_power_usage": total_power_usage,
+      "avg_power": avg_power, # avg_power in this run
+      "kwh": kwh, # in this run
       "relevant_power_values": relevant_power_values,
       "num_of_power_values": len(relevant_power_values), 
       "tasks_assigned": total_tasks,
-      "efficiency_per_task": efficiency_per_task,
-      "efficiency": inv_efficiency,
+      "efficiency_per_task": efficiency_per_task, # kwh per task
+      "efficiency": inv_efficiency, # tasks per kWh
       "total_duration": total_duration,
       "time_per_task": time_per_task
    }])
@@ -169,7 +188,6 @@ def aggregate_last_n_entries(n=5):
    global df_client_power
 
    # Select the last `n` lines for the specified client
-   # last_n_entries = df_client_power[df_client_power["client_id"] == client_id].tail(n)
    last_n_entries = df_client_power.tail(n)
 
    if last_n_entries.empty:
@@ -179,31 +197,29 @@ def aggregate_last_n_entries(n=5):
 
    # calculate sums and means of the values
    total_power = last_n_entries["total_power_usage"].sum()
+   avg_power = total_power / n
    total_tasks = last_n_entries["tasks_assigned"].sum()
-   total_duration = last_n_entries["total_duration"].sum()
    total_power_values = last_n_entries["num_of_power_values"].sum()
-   total_avg_power_per_second = last_n_entries["avg_power_per_second"].sum() # power per second in watts
-   total_avg_power_per_minute = last_n_entries["avg_power_per_minute"].sum() # einheit in wattsekunden
    total_kwh = last_n_entries["kwh"].sum() # kwh summiert für das gesamte Netzwerk -> danach dann verteilen, immer an den mehr aufgaben, der am ende weniger kwh verbraucht hat
    
    avg_efficiency_per_task = last_n_entries["efficiency_per_task"].mean()
    avg_inv_efficiency = last_n_entries["efficiency"].mean()
    avg_time_per_task = last_n_entries["time_per_task"].mean()
+   avg_duration = last_n_entries["total_duration"].mean()
    # avg_power_values = last_n_entries["num_of_power_values"].mean()
 
    # create new df row with aggregated data
    new_data = pd.DataFrame([{
-      "client_id": 0, # for all clients
+      "client_id": 0,
       "total_power_usage": total_power,
-      "avg_power_per_second": total_avg_power_per_second,
-      "avg_power_per_minute": total_avg_power_per_minute,
-      "kwh": total_kwh,
-      "relevant_power_values": [], # could be all values for every client together but i think thats not relevant
-      "num_of_power_values": total_power_values,
+      "avg_power": avg_power, # avg_power of the network
+      "kwh": total_kwh, # power for the whole network
+      "relevant_power_values": None,
+      "num_of_power_values": total_power_values, 
       "tasks_assigned": total_tasks,
-      "efficiency_per_task": avg_efficiency_per_task, 
+      "efficiency_per_task": avg_efficiency_per_task,
       "efficiency": avg_inv_efficiency,
-      "total_duration": total_duration,
+      "total_duration": avg_duration, # we use avg_duration, this is much more logical
       "time_per_task": avg_time_per_task
    }])
 
@@ -239,10 +255,6 @@ def load_tasks_from_file():
             loaded_tasks = [line.strip() for line in file.readlines() if line.strip()]
             task_num = len(loaded_tasks)
 
-            # set path for timestamp_file
-            timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
-            timestamp_file = os.path.join(log_directory, f"{timestamp}_{task_num}_TM.txt")
-
             # extend every task with sender and random receiver -> only for random distribution
             task_list = [
                f"{task} sender={client_id}, receiver={random.choice(list(connected_clients))}\""
@@ -268,6 +280,7 @@ def distribute_tasks(client):
    global task_list
    global clients_with_tasks
    global task_count
+   global start_distribution
 
    while not stop_event.is_set():
       if not connected_clients:
@@ -319,34 +332,10 @@ def distribute_tasks(client):
                print(f"Sent {number_of_tasks} tasks to {target_client}.")
                task_count[target_client] = number_of_tasks # set task counter
                clients_with_tasks += 1 # one client more who got tasks
+               start_distribution = time.time() # starting counting the time for idle clients
             else:
                print(f"Target client {target_client} is not connected. Skipping.")
             time.sleep(2) # small delay to avoid overwhelming mqtt
-
-# send pings to clients
-# def send_ping(client):
-#    while not stop_event.is_set():
-#       ping_event.wait()  # wait until event starts
-#       client.publish("ping/request", "Ping from TaskManager", qos=1)
-#       time.sleep(10)
-
-
-# remove inactive clients from connected_clients list
-# def remove_inactive_clients():
-#    while not stop_event.is_set():
-#       current_time = time.time()
-#       for client_name in list(connected_clients):
-#          # after 10 sec check if clients not answering the pings anymore
-#          if client_name in client_ping_timestamps:
-#             if current_time - client_ping_timestamps[client_name] > 10:
-#                print(f"Client {client_name} is inactive. Removing from connected clients.")
-#                connected_clients.remove(client_name)
-#                del client_ping_timestamps[client_name]  # remove client from dict
-#          elif client_name not in client_ping_timestamps:
-#             connected_clients.remove(client_name)
-#          else:
-#             continue
-#       time.sleep(5)  # check every 5 sek
 
 # monitor active clients
 def monitor_clients():
@@ -374,22 +363,6 @@ def on_connect(client, userdata, flags, rc):
    client.subscribe("task_generator", qos=1) # listen to the task_generator
    client.subscribe("ShellyVerbrauch/#")  # Subscribe to all Shelly power topics
    client.subscribe("finish/#")
-
-# def log_event(event):
-#    global timestamp_file
-#    if timestamp_file is None:
-#       print("Error: Timestamp file path is not set. Please load tasks first.")
-#       return
-
-#    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-#    log_entry = f"[{timestamp}] {event}\n"
-#    print(log_entry, end="")
-
-#    try:
-#       with open(timestamp_file, "a", encoding="utf-8") as file:
-#          file.write(log_entry)
-#    except Exception as e:
-#       print(f"Error in logging event: {e}")
 
 def get_shelly_apower_data_status_switch(topic, message):
    # Parse the client ID from the topic
@@ -448,6 +421,39 @@ def get_shelly_apower_data_events(topic, message):
       except Exception as e:
             print(f"⚠️ Unexpected error when processing {topic}: {e}")
 
+def handle_idle_clients(duration):
+    """Handle clients that have no tasks assigned and fill idle values."""
+    global df_client_power
+
+    for client_id in client_ids:  # iterate through the client_ids
+        # check if the client is not listed in the task_count or has no tasks assigned
+        if task_count.get(client_id, 0) == 0 or client_id not in task_count:
+            # get the idle power value from the df_idle_power DataFrame
+            idle_power_value = df_idle_power.loc[df_idle_power['client_id'] == client_id, 'idle_power_value'].values[0]
+
+            # Create a new row for this client with idle power values
+            new_data = pd.DataFrame([{
+               "client_id": client_id,
+               "total_power_usage": idle_power_value * duration,
+               "avg_power": idle_power_value,  # Idle power is considered as average power
+               "kwh": (idle_power_value * duration) / 3600000,  # Example calculation to get kWh
+               "relevant_power_values": [idle_power_value],
+               "num_of_power_values": 1,  # Only one value (idle power)
+               "tasks_assigned": 0,  # No tasks assigned
+               "efficiency_per_task": 0,  # Efficiency would be 0 as no tasks were assigned
+               "efficiency": 0,  # Inverted efficiency would also be 0
+               "total_duration": duration,  # Placeholder for total duration (e.g., 1 hour for idle time)
+               "time_per_task": 0  # No tasks, so no time per task
+            }])
+
+            # Append this data to the DataFrame
+            df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+
+            print(f"✅ Added Idle Data for {client_id}: {new_data.to_dict(orient='records')}")
+
+            # End the task session for idle clients
+            end_task_session(client_id, time.time())  # Use current time as end_time for idle session
+
 # callback when receiving messages
 def on_message(client, userdata, msg):
    global task_list
@@ -468,22 +474,23 @@ def on_message(client, userdata, msg):
       # print("Anzahl der Clients mit Aufgaben:", clients_with_tasks)
       finisher_counter += 1
       if message.startswith("Finished"):
-            finished_client = message.split(" ")[1]  # Assuming the message is something like "Finished ClientName"
-            client_status[finished_client] = 0  # Set status to 0 (tasks completed)
-            end_time = time.time()
-            end_task_session(finished_client, end_time)
-            # Save the collected power data for the finished client
-            # if finished_client in power_tracking:
-            #     client_power_summary[finished_client].extend(power_tracking[finished_client])
-            #     print(f"Summed power usage for {finished_client}: {client_power_summary[finished_client]} W")
-            #     power_tracking[finished_client] = []  # Reset for the next task
+         finished_client = message.split(" ")[1]  # Assuming the message is something like "Finished ClientName"
+         client_status[finished_client] = 0  # Set status to 0 (tasks completed)
+         end_time = time.time()
+         end_task_session(finished_client, end_time)
       if clients_with_tasks == finisher_counter:
+         stop_distribution = time.time()
+
          print(f"All tasks have been processed: done_tasks = {finisher_counter}, init_tasks {task_num}")
          client.publish("start_stop/taskWorker", 0, qos=1) # status=0 when all clients worked the tasks
          client.publish("tasks_done", "done", qos=1) # publish message to tg to trigger new task batch
          
+         print("handling idle clients..")
+         duration = stop_distribution - start_distribution
+         handle_idle_clients(duration)
+
          # change the n when more clients are connected!!
-         aggregate_last_n_entries(1)
+         aggregate_last_n_entries(5)
 
          # Log directory for results
          project_root = os.getcwd()  # Hauptverzeichnis
@@ -512,11 +519,6 @@ def on_message(client, userdata, msg):
          connected_clients.discard(client_name)
       elif "Connected" in message:
          connected_clients.add(client_name)
-   # check for ping answers
-   # elif topic.startswith("ping/response/"):
-      # client_name = topic.split("/")[-1]
-      # connected_clients.add(client_name) #TODO do i need that
-      # client_ping_timestamps[client_name] = time.time()  # set timestamp to now
    # extract task_gen messages
    elif topic == "task_generator":
       print("Task generator triggered. Loading tasks...")
@@ -548,17 +550,11 @@ if __name__ == '__main__':
       # connect to MQTT broker
       client.connect(MQTT_Broker, Broker_Port)
       client.enable_logger()
-      
-      # start ping, monitoring and tasks thread
-      # ping_thread = threading.Thread(target=send_ping, args=(client,))
+
       monitor_thread = threading.Thread(target=monitor_clients)
       task_thread = threading.Thread(target=distribute_tasks, args=(client,))
-      # remove_inactive_clients_thread = threading.Thread(target=remove_inactive_clients)
-
-      # ping_thread.start()
       monitor_thread.start()
       task_thread.start()
-      # remove_inactive_clients_thread.start()
 
       client.loop_forever()
 
@@ -580,9 +576,6 @@ if __name__ == '__main__':
       client.disconnect()
       print("Client disconnected.")
 
-      # Join threads only if they are alive
-      # if 'ping_thread' in locals() and ping_thread.is_alive():
-      #    ping_thread.join(timeout=5)
       if 'monitor_thread' in locals() and monitor_thread.is_alive():
          monitor_thread.join(timeout=5)
       if 'task_thread' in locals() and task_thread.is_alive():
