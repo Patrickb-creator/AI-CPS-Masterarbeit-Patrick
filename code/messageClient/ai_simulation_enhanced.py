@@ -40,7 +40,7 @@ global hostName, hostArch, log_directory
 pc_name = "LenasPC"
 
 # Get MAC-address -> extension for strategy
-mac_address = ':'.join(format(x, '02x') for x in uuid.getnode().to_bytes(6, 'big'))
+# mac_address = ':'.join(format(x, '02x') for x in uuid.getnode().to_bytes(6, 'big'))
 
 hostArch = platform.machine()
 
