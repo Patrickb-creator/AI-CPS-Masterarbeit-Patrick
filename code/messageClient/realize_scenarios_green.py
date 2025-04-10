@@ -1,11 +1,6 @@
 import subprocess
 import paho.mqtt.client as mqtt
 from multiprocessing import Process, Queue, current_process, freeze_support
-import time
-import csv
-import os
-import platform
-import numpy
 from datetime import datetime
 
 def build_docker_file_for_publication_at_dockerhub(scenario, knowledge_base, activation_base, code_base, learning_base, sender, receiver, hostArch, logDirectory):
@@ -735,13 +730,16 @@ def unroll_sensorValuesFromScenario(message):
      return scenario, cps1_conveyor_workpieceSensorLeft, cps1_conveyor_workpieceSensorCenter, cps1_conveyor_workpieceSensorRight, cps2_conveyor_workpieceSensorLeft, cps2_conveyor_workpieceSensorCenter, cps2_conveyor_workpieceSensorRight
 
 def run_docker_compose_parallel(sender, receiver, log_directory, log_to_file=True):
+     """
+     Runs a Docker Compose setup asynchronously for the given sender, with optional logging.
+     """
      timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # paths to log files
+    # Paths to log files
      stdout_file = f"{log_directory}/{sender}_{timestamp}_stdout.txt"
      stderr_file = f"{log_directory}/{sender}_{timestamp}_stderr.txt"
 
-    # creation of log files, if user wants to have them
+    # Create log files, if user wants to have the
      if log_to_file:
           stdout_stream = open(stdout_file, "wb")
           stderr_stream = open(stderr_file, "wb")
@@ -749,12 +747,8 @@ def run_docker_compose_parallel(sender, receiver, log_directory, log_to_file=Tru
           stdout_stream = subprocess.PIPE
           stderr_stream = subprocess.PIPE
 
-     # codecarbon just for testing
-     # tracker = EmissionsTracker(measure_power_secs=1, allow_multiple_runs=True)  # CodeCarbon Tracker für Stromverbrauchsmessung
-
      try:
-          # tracker.start()  # Messung starten
-          # Docker Compose Prozess starten
+          # # Start Docker Compose
           p = subprocess.Popen(
                f"docker-compose -f {log_directory}/{sender}-docker-compose.yml up --remove-orphans",
                shell=True, stdout=stdout_stream, stderr=stderr_stream
@@ -762,10 +756,10 @@ def run_docker_compose_parallel(sender, receiver, log_directory, log_to_file=Tru
         
           print(f'Message of {sender} has been triggered at {receiver} successfully!')
         
-          # catch the output after it´s done
+          # Catch the output after it´s done
           stdout, stderr = p.communicate()
      
-          # show results directly in console when file logging is deactivated
+          # Show results directly in console when file logging is deactivated
           if not log_to_file:
                if stdout:
                     print(stdout.decode('utf-8'))
@@ -778,19 +772,18 @@ def run_docker_compose_parallel(sender, receiver, log_directory, log_to_file=Tru
                if stderr:
                     with open(stderr_file, "ab") as f:
                          f.write(stderr)
-          # set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
-          # print("Set power scheme to balanced.")
-     finally:
-          # emissions = tracker.stop()  # Messung beenden
-          # Ausgabe der Emissionsdaten
-          # print(emissions)
-          
+          # Enhancement: set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
+          # Enhancement: print("Set power scheme to balanced.")
+     finally:          
           if log_to_file:
                stdout_stream.close()
                stderr_stream.close()
 
 
 def run_docker_compose_sequential(sender, receiver, log_directory, log_to_file=True):
+     """
+     Runs a Docker Compose setup synchronously and waits for it to finish, with optional logging.
+     """
      timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # paths to log files
@@ -834,10 +827,6 @@ def run_docker_compose_sequential(sender, receiver, log_directory, log_to_file=T
                     # set_power_scheme("381b4222-f694-41f0-9685-ff5bb260df2e")
                     # print("Set power scheme to balanced.")
      finally:
-          # emissions = tracker.stop()  # Messung beenden
-          # Ausgabe der Emissionsdaten
-          # print(emissions)
-          
           if log_to_file:
                stdout_stream.close()
                stderr_stream.close()
