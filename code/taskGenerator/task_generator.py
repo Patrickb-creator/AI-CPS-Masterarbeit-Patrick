@@ -11,6 +11,29 @@
 #6. Initiate experiment realize_annExperiment from remote:
 #mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=realize_annExperiment, knowledge_base=-, activation_base=-, code_base=-, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
 
+"""
+Task Generator for MQTT-based AI Workflow System
+
+This script generates and publishes task messages to a specified MQTT broker. 
+It is designed to simulate and test different AI task scenarios by constructing random
+task types with various base configurations.
+
+Main Features:
+- Connects to an MQTT broker (either discovered via mDNS or read from file).
+- Provides a CLI for users to generate a specified number of tasks.
+- Supports different task types (e.g., apply, create, refine, wire AI solutions).
+- Saves generated tasks to a local file for debugging or review.
+- Notifies task manager via MQTT when new tasks have been generated.
+
+Usage:
+Run the script and follow the interactive prompts to generate and dispatch tasks.
+
+Dependencies:
+- paho-mqtt
+- zeroconf
+- Custom modules: messageClient.mqtt_broker_listener, taskGenerator.get_bases
+"""
+
 import sys
 import paho.mqtt.client as mqtt
 import os
@@ -36,7 +59,7 @@ experiment_num_tracker = 1
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 
-# if you want to read bases from the bases.txt file, because you don´t have the images folder
+# If you want to read bases from the bases.txt file, because you don´t have the images folder
 # use this method in task_generator instead of the method in get_bases
 def read_bases(bases_file):
     # read file with the basenames
@@ -50,6 +73,9 @@ def read_bases(bases_file):
 
 # get the latest broker IP of the broker which was started
 def get_broker_ip_via_file():
+    """
+    Retrieves the latest MQTT broker IP address from a log file.
+    """
     broker_dir = os.path.join(parent_dir, "messageBroker")
     ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
     try:
@@ -69,117 +95,90 @@ def on_message(client, userdata, msg):
     global MQTT_Broker 
 
     message = msg.payload.decode()
-    topic = msg.topic
     print(message)
-    # print("got message from tm")
-    # experiment num tracker höher setzen je nachdem wie oft die 10 Aufgaben verteilt werden sollen
-    #if topic == "tasks_done" and experiment_num_tracker < 5:
-    #    # change num of tasks if you need more
-    #    task_generator(number_of_tasks=2, MQTT_topic="mqttTester", host=MQTT_Broker, client=client)
-    #else:
-    #    print(f"Published {experiment_num_tracker} times x tasks.")
 
 def task_generator(number_of_tasks, MQTT_topic, host, client, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
-    # scenarios = [
-    #     "apply_annSolution",
-    #     "create_annSolution",
-    #     "refine_annSolution",
-    # ]
+    scenarios = [
+        "apply_annSolution",
+        "create_annSolution",
+        "refine_annSolution",
+    ]
 
     global experiment_num_tracker
     
-    # fet bases from the directory
+    # Get bases from the directory
     all_bases = get_bases.get_bases()
 
-    # filter out specific knowledge bases
+    # Filter out specific knowledge bases
     excluded_bases = ["marcusgrum/knowledgebase_cps1_transport_system_01", "marcusgrum/knowledgebase_cps2_transport_system_01"]
 
     knowledge_base = [base for base in all_bases if "knowledgebase" in base and base not in excluded_bases]
     activation_base = [base for base in all_bases if "activationbase" in base]
     learning_base = [base for base in all_bases if "learningbase" in base]
     code_base = "marcusgrum/codebase_ai_core_for_image_classification"
-
-#  for _ in range(number_of_tasks):
-#         scenario = random.choice(scenarios)
-#         task = {
-#             "scenario": scenario,
-#             "knowledge_base": random.choice(knowledge_base) if scenario != "create_annSolution" else "-",
-#             "activation_base": random.choice(activation_base) if scenario != "create_annSolution" else "-",
-#             "learning_base": random.choice(learning_base) if scenario != "apply_annSolution" else "-",
-#             "code_base": code_base,
-#             "sender": "{SENDER}",  # Platzhalter
-#             "receiver": "{RECEIVER}",  # Platzhalter
-#         }
-#         tasks.append(task)
-
+    
     tasks = []
+
     for _ in range(number_of_tasks):
-        # scenario = random.choice(scenarios)
-        scenario = "apply_annSolution"
-        # if scenario == "apply_annSolution":
-        task = f"mosquitto_pub " \
-            f"-h {host} " \
-            f"-p 1883 " \
-            f"-t \"{MQTT_topic}\" "\
-            f"-u {MQTT_Username} " \
-            f"-P {MQTT_Password} " \
-            f'-m "Please realize the following AI case: ' \
-            f"scenario={scenario}, " \
-            f"knowledge_base={random.choice(knowledge_base)}, " \
-            f"activation_base={random.choice(activation_base)}, " \
-            f"code_base={code_base}, " \
-            f"learning_base=-, " #\
-            # f"sender={sender}, " \
-            # f"receiver={receiver}\" "
-        # elif scenario == "create_annSolution":
-        #     task = f"mosquitto_pub " \
-        #         f"-h {host} " \
-        #         f"-p 1883 " \
-        #         f"-t \"{MQTT_topic}\" "\
-        #         f"-u {MQTT_Username} " \
-        #         f"-P {MQTT_Password} " \
-        #         f'-m "Please realize the following AI case: ' \
-        #         f"scenario={scenario}, " \
-        #         f"knowledge_base=-, " \
-        #         f"activation_base=-, " \
-        #         f"code_base={code_base}, " \
-        #         f"learning_base={random.choice(learning_base)}, " #\
-        #         # f"sender={sender}, " \
-        #         # f"receiver={receiver}\" "
-        # elif scenario == "refine_annSolution":
-        #     task = f"mosquitto_pub " \
-        #         f"-h {host} " \
-        #         f"-p 1883 " \
-        #         f"-t \"{MQTT_topic}\" "\
-        #         f"-u {MQTT_Username} " \
-        #         f"-P {MQTT_Password} " \
-        #         f'-m "Please realize the following AI case: ' \
-        #         f"scenario={scenario}, " \
-        #         f"knowledge_base={random.choice(knowledge_base)}, " \
-        #         f"activation_base=-, " \
-        #         f"code_base={code_base}, " \
-        #         f"learning_base={random.choice(learning_base)}, " # \
-                # "sender={sender}, " \
-                # f"receiver={receiver}\" "
-        # elif scenario == "wire_annSolution":
-        #     # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
-        #     task = f"mosquitto_pub " \
-        #             f"-h {host} " \
-        #             f"-p 1883 " \
-        #             f"-t \"{MQTT_topic}\" "\
-        #             f"-u {MQTT_Username} " \
-        #             f"-P {MQTT_Password} " \
-        #             f'-m "Please realize the following AI case: ' \
-        #             f"scenario={scenario}, " \
-        #             f"knowledge_base=-, " \
-        #             f"activation_base=-, " \
-        #             f"code_base={code_base}, " \
-        #             f"learning_base=-, " #\
-        #             # f"sender={sender}, " \
-        #             # f"receiver={receiver}\" "
+        scenario = random.choice(scenarios)
+        # scenario = "apply_annSolution"
+        if scenario == "apply_annSolution":
+            task = f"mosquitto_pub " \
+                f"-h {host} " \
+                f"-p 1883 " \
+                f"-t \"{MQTT_topic}\" "\
+                f"-u {MQTT_Username} " \
+                f"-P {MQTT_Password} " \
+                f'-m "Please realize the following AI case: ' \
+                f"scenario={scenario}, " \
+                f"knowledge_base={random.choice(knowledge_base)}, " \
+                f"activation_base={random.choice(activation_base)}, " \
+                f"code_base={code_base}, " \
+                f"learning_base=-, " #\
+        elif scenario == "create_annSolution":
+            task = f"mosquitto_pub " \
+                f"-h {host} " \
+                f"-p 1883 " \
+                f"-t \"{MQTT_topic}\" "\
+                f"-u {MQTT_Username} " \
+                f"-P {MQTT_Password} " \
+                f'-m "Please realize the following AI case: ' \
+                f"scenario={scenario}, " \
+                f"knowledge_base=-, " \
+                f"activation_base=-, " \
+                f"code_base={code_base}, " \
+                f"learning_base={random.choice(learning_base)}, " #\
+
+        elif scenario == "refine_annSolution":
+            task = f"mosquitto_pub " \
+                f"-h {host} " \
+                f"-p 1883 " \
+                f"-t \"{MQTT_topic}\" "\
+                f"-u {MQTT_Username} " \
+                f"-P {MQTT_Password} " \
+                f'-m "Please realize the following AI case: ' \
+                f"scenario={scenario}, " \
+                f"knowledge_base={random.choice(knowledge_base)}, " \
+                f"activation_base=-, " \
+                f"code_base={code_base}, " \
+                f"learning_base={random.choice(learning_base)}, " # \
+        elif scenario == "wire_annSolution":
+            # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
+            task = f"mosquitto_pub " \
+                    f"-h {host} " \
+                    f"-p 1883 " \
+                    f"-t \"{MQTT_topic}\" "\
+                    f"-u {MQTT_Username} " \
+                    f"-P {MQTT_Password} " \
+                    f'-m "Please realize the following AI case: ' \
+                    f"scenario={scenario}, " \
+                    f"knowledge_base=-, " \
+                    f"activation_base=-, " \
+                    f"code_base={code_base}, " \
+                    f"learning_base=-, " #\
         tasks.append(task)
 
-    # store the generated tasks to an output file
+    # Store the generated tasks to an output file
     output_file = os.path.join(current_dir, "generated_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
@@ -187,7 +186,7 @@ def task_generator(number_of_tasks, MQTT_topic, host, client, MQTT_Username="use
 
     print(f"{number_of_tasks} tasks were stored in {output_file}.")
 
-    # publih a message to the Task Manager, that new Tasks where generated
+    # Publih a message to the Task Manager, that new Tasks where generated
     client.publish("task_generator", f"{number_of_tasks} new tasks generated", qos=1)
     experiment_num_tracker += 1
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
@@ -196,13 +195,13 @@ def main():
     global experiment_num_tracker
 
     experiment_num_tracker = 0
-    # initialize MQTT-Client
+    # Initialize MQTT-Client
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
     client.username_pw_set(MQTT_Username, MQTT_Password)
 
-    # get the broker ip from the mDNS
+    # Get the broker ip from the mDNS
     broker_info = mqtt_broker_listener.discover_broker()
     
     if broker_info:
@@ -217,22 +216,6 @@ def main():
     # - Method 1 - connect via plain MQTT protocol
     client.connect(MQTT_Broker, Broker_Port)
     client.loop_start()
-
-    #for the first triggering the user has to start one tg by himself 
-    # after that the tg is waiting for done messages from the task manager
-    # user_input = input("Start the Task Generating Process? (Enter 'y' to start or 'exit' to quit): ")
-    # if user_input.lower() == "y":
-    #     print("Starting the task generating process")
-    #     task_generator(number_of_tasks=2, MQTT_topic="mqttTester", host=MQTT_Broker, client=client)
-    # elif user_input.lower() == "exit":
-    #     print("Stopping MQTT client...")
-    #     client.loop_start()
-    #     client.disconnect()
-    #     sys.exit(0)
-    # else:
-    #     print("no correct input, try again.")
-
-    # client.loop_forever()
 
     while True:
         try:

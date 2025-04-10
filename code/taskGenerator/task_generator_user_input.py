@@ -11,6 +11,29 @@
 #6. Initiate experiment realize_annExperiment from remote:
 #mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=realize_annExperiment, knowledge_base=-, activation_base=-, code_base=-, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
 
+"""
+Task Generator for MQTT-based AI Workflow System
+
+This script generates and publishes task messages to a specified MQTT broker. 
+It is designed to simulate and test different AI task scenarios by constructing 
+tasks with various base configurations.
+
+Main Features:
+- Connects to an MQTT broker (either discovered via mDNS or read from file).
+- Provides a CLI for users to generate a specified number of tasks.
+- Supports different task types (e.g., apply, create, refine, wire AI solutions).
+- Saves generated tasks to a local file for debugging or review.
+- Notifies task manager via MQTT when new tasks have been generated.
+
+Usage:
+Run the script and follow the interactive prompts to generate and dispatch tasks.
+
+Dependencies:
+- paho-mqtt
+- zeroconf
+- Custom modules: messageClient.mqtt_broker_listener, taskGenerator.get_bases
+"""
+
 import sys
 import paho.mqtt.client as mqtt
 import os
@@ -36,6 +59,7 @@ parent_dir = os.path.dirname(current_dir)
 # if you want to read bases from the bases.txt file, because you don´t have the images folder
 # use this method in task_generator instead of the method in get_bases
 def read_bases(bases_file):
+    
     # read file with the basenames
     with open(bases_file, "r") as file:
         file_entries = file.readlines()
@@ -47,6 +71,9 @@ def read_bases(bases_file):
 
 # get the latest broker IP of the broker which was started
 def get_broker_ip_via_file():
+    """
+    Retrieves the latest MQTT broker IP address from a log file.
+    """
     broker_dir = os.path.join(parent_dir, "messageBroker")
     ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
     try:
@@ -102,8 +129,6 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
                 f"activation_base={random.choice(activation_base)}, " \
                 f"code_base={code_base}, " \
                 f"learning_base=-, " #\
-                # f"sender={sender}, " \
-                # f"receiver={receiver}\" "
         elif scenario == "create_annSolution":
             task = f"mosquitto_pub " \
                 f"-h {host} " \
@@ -117,8 +142,6 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
                 f"activation_base=-, " \
                 f"code_base={code_base}, " \
                 f"learning_base={random.choice(learning_base)}, " #\
-                # f"sender={sender}, " \
-                # f"receiver={receiver}\" "
         elif scenario == "refine_annSolution":
             task = f"mosquitto_pub " \
                 f"-h {host} " \
@@ -132,8 +155,6 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
                 f"activation_base=-, " \
                 f"code_base={code_base}, " \
                 f"learning_base={random.choice(learning_base)}, " # \
-                # "sender={sender}, " \
-                # f"receiver={receiver}\" "
         elif scenario == "wire_annSolution":
             # mosquitto_pub -t "CoNM/workflow_system" -u user1 -P password1 -m "Please realize the following AI case: scenario=wire_annSolution, knowledge_base=-, activation_base=-, code_base=marcusgrum/codebase_ai_core_for_image_classification, learning_base=-, sender=SenderA, receiver=ReceiverB." -h "test.mosquitto.org" -p 1883
             task = f"mosquitto_pub " \
@@ -148,11 +169,9 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
                     f"activation_base=-, " \
                     f"code_base={code_base}, " \
                     f"learning_base=-, " #\
-                    # f"sender={sender}, " \
-                    # f"receiver={receiver}\" "
         tasks.append(task)
 
-    # save generated task types
+    # Save generated task types
     output_file = os.path.join(current_dir, "testing_tt_tasks.txt")
     with open(output_file, "w") as file:
         for task in tasks:
@@ -160,18 +179,18 @@ def task_generator(number_of_tasks, task_type, MQTT_topic, client, host, MQTT_Us
 
     print(f"{number_of_tasks} tasks were stored in {output_file}.")
 
-    # inform manager about new tasks
+    # Inform manager about new tasks
     client.publish(MQTT_Task_Generator_Topic, f"{number_of_tasks} new tasks generated", qos=1)
     print(f"Published task notification to topic '{MQTT_Task_Generator_Topic}'.")
 
 
 def main():
-    # Initialisiere den MQTT-Client
+    # Initialize the MQTT client
     client = mqtt.Client()
     client.on_connect = on_connect
     client.username_pw_set(MQTT_Username, MQTT_Password)
 
-    # get the broker ip from the mDNS
+    # Get the broker ip from the mDNS
     broker_info = mqtt_broker_listener.discover_broker()
     
     if broker_info:
@@ -182,7 +201,7 @@ def main():
         MQTT_Broker = get_broker_ip_via_file() or "localhost"
         Broker_Port = 1883
 
-    # establish connection of client and server
+    # Establish connection of client and server
     # - Method 1 - connect via plain MQTT protocol
     client.connect(MQTT_Broker, Broker_Port)
 
@@ -190,7 +209,6 @@ def main():
 
     while True:
         try:
-            # Benutzer nach der Anzahl der Aufgaben fragen
             user_input = input("How many tasks should be generated? (Enter a number or 'exit' to quit): ")
             if user_input.lower() == "exit":
                 print("Exiting Task Generator.")
@@ -201,7 +219,7 @@ def main():
                 print("Please enter a positive number.")
                 continue
 
-            # ask user to give a task type
+            # Ask user to give a task type
             print("Choose the task type:")
             print("1: apply_annSolution")
             print("2: create_annSolution")
@@ -209,7 +227,7 @@ def main():
             print("3: wire_annSolution")
             task_type = input("Geben Sie die Nummer des Aufgabentyps ein: ")
 
-            # Generiere die Aufgaben basierend auf der Eingabe
+            # Generate the tasks based on the input
             task_generator(number_of_tasks=number_of_tasks, task_type=task_type, MQTT_topic="mqttTester", client=client, host=MQTT_Broker)
 
         except ValueError:
