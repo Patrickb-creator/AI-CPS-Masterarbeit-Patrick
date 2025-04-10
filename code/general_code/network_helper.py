@@ -5,10 +5,8 @@ to get help with the connections
 """
 
 import socket
-import os
-import sys
 
-# get the latest broker ip of the broker which was started
+# Get the latest broker ip of the broker which was started
 def get_broker_ip():
    ip_file = "broker_ip_log.txt"
    try:
@@ -20,14 +18,14 @@ def get_broker_ip():
    except FileNotFoundError:
       print(f"File {ip_file} not found")
 
-# maybe you need the local ip adress of the computer on which a client is running
+# Maybe you need the local ip adress of the computer on which a client is running
 def get_local_ip():
     try:
-        # Verbindung zu einer nicht existierenden Adresse (um das Netzwerkinterface zu bestimmen)
+        # Connection to a non-existent address to determine the network interface
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))  # 8.8.8.8 ist ein öffentlicher DNS-Server von Google
-            ip_address = s.getsockname()[0]  # Hol dir die IP-Adresse des Geräts
+            s.connect(("8.8.8.8", 80))  # 8.8.8.8 is an open DNS-Server from Google
+            ip_address = s.getsockname()[0]  # Get own ip-adress
         return ip_address
     except Exception as e:
-        print(f"Fehler beim Abrufen der IP-Adresse: {e}")
+        print(f"Error when retrieving the IP address: {e}")
         return None
