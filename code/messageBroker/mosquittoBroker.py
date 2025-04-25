@@ -17,6 +17,7 @@ import os
 import socket
 import subprocess
 import logging
+import datetime
 from zeroconf import ServiceInfo, Zeroconf
 
 # Log file and config settings
@@ -45,6 +46,9 @@ def get_local_ip():
 
 def write_broker_ip(local_ip):
     """Write the broker's IP address to a file."""
+    now = datetime.datetime.now()
+    formatted_now = now.strftime("%Y-%m-%d %H:%M:%S")
+    
     with open(broker_ip_log, "w") as file:
         file.write(f"{local_ip}")
 

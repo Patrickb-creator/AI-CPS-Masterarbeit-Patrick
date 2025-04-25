@@ -13,21 +13,12 @@ class MQTTBrokerListener(ServiceListener):
         self.broker_info = None
 
     def update_service(self, zeroconf, service_type, name):
-        """
-        Handles service updates (not used for broker discovery).
-        """
         print(f"Updated service: {name}")
 
     def remove_service(self, zeroconf, service_type, name):
-        """
-        Handles removal of a service (for logging purposes).
-        """
         print(f"Removed service: {name}")
 
     def add_service(self, zeroconf, service_type, name):
-        """
-        Handles newly discovered service and extracts broker IP and port.
-        """
         info = zeroconf.get_service_info(service_type, name)
         if info:
             ip_address = socket.inet_ntoa(info.addresses[0])
@@ -42,6 +33,7 @@ def discover_broker(service_type="_mqtt._tcp.local.", timeout=5):
     """
     zeroconf = Zeroconf()
     listener = MQTTBrokerListener()
+    browser = ServiceBrowser(zeroconf, service_type, listener)
     
     start_time = time.time()
     while listener.broker_info is None and (time.time() - start_time) < timeout:

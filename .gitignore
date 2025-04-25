@@ -10,3 +10,5 @@ code/experiments/logs
 code/messageClient/logs
 code/messageClient/code/messageClient
 code/taskManager/logs
+code/otherTaskGenerators
+power_data_analysis
