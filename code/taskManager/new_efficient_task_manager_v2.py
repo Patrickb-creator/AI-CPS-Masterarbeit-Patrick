@@ -32,6 +32,9 @@ from collections import defaultdict
 import json
 import pandas as pd
 import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+import joblib  # Zum Speichern und Laden des Modells
 
 # Add the parent directory (where "taskGenerator" is) to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -103,6 +106,9 @@ df_idle_power = pd.DataFrame({
     "client_id": client_ids,
     "idle_power_value": idle_power_values
 })
+
+ml_model = RandomForestRegressor()
+model_trained = False  # Flag, um zu prüfen, ob das Modell bereits trainiert wurde
 
 # Get the latest broker ip of the broker which was started via file -> Fallback Option
 def get_broker_ip_via_file():
@@ -280,6 +286,55 @@ def aggregate_last_n_entries(n=5):
     }])
     
     df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+
+def train_ml_model():
+    global ml_model, model_trained
+
+    if df_client_power.empty or len(df_client_power) < 10:  # Mindestanzahl an Datenpunkten
+        print("Nicht genügend Daten zum Trainieren des Modells.")
+        return
+
+    # Features und Zielwerte definieren
+    X = df_client_power[["avg_power", "tasks_assigned", "total_duration", "efficiency"]]
+    y = df_client_power["efficiency_per_task"]  # Zielwert: Effizienz pro Aufgabe
+
+    # Train-Test-Split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Modell trainieren
+    ml_model.fit(X_train, y_train)
+    model_trained = True
+    print("ML-Modell erfolgreich trainiert.")
+    train_ml_model()
+
+
+
+def distribute_tasks_with_ml():
+    global task_list, df_client_power, clients_with_tasks, ml_model, model_trained
+
+    if not model_trained:
+        print("ML-Modell ist nicht trainiert. Fallback auf zufällige Verteilung.")
+        return distribute_tasks_randomly()
+
+    # Vorhersagen für die Anzahl der Aufgaben pro Client
+    client_task_dict = {}
+    for client_id in connected_clients:
+        # Extrahiere die aktuellen Merkmale des Clients
+        client_data = df_client_power[df_client_power["client_id"] == client_id]
+        if client_data.empty:
+            print(f"Keine Daten für Client {client_id}.")
+            continue
+
+        X = client_data[["avg_power", "tasks_assigned", "total_duration", "efficiency"]].tail(1)
+        predicted_efficiency = ml_model.predict(X)[0]
+
+        # Verteile Aufgaben proportional zur vorhergesagten Effizienz
+        num_tasks = int(predicted_efficiency * len(task_list) / sum(df_client_power["efficiency"]))
+        client_task_dict[client_id] = task_list[:num_tasks]
+        task_list = task_list[num_tasks:]
+
+    clients_with_tasks = len([tasks for tasks in client_task_dict.values() if tasks])
+    return client_task_dict
 
 # Read tasks from file and populate task_list
 def load_tasks_from_file():
@@ -517,14 +572,14 @@ def run_task_distribution(client):
                 # Calculation of the average efficiency
                 efficiency = calculate_historical_efficiency()
 
-                if not efficiency:
-                    # Random distribution to the clients, we first have to write something in our dict
-                    start_distribution = time.time()
-                    task_distribution = distribute_tasks_randomly()
-                else:
-                    # Clients nach Energieeffizienz sortieren (höchste zuerst)               
-                    start_distribution = time.time()
+                if model_trained:
+                    task_distribution = distribute_tasks_with_ml()
+                elif efficiency:
                     task_distribution = distribute_tasks_by_efficiency()
+                else:
+                    task_distribution = distribute_tasks_randomly()
+
+                start_distribution = time.time()
                 # send tasks to the clients
                 distribute_tasks_to_clients(client, task_distribution)
                 task_list.clear()

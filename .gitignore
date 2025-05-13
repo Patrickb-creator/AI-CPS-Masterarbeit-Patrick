@@ -4,6 +4,7 @@
 *.pyc
 
 # ignore ALL files in ANY directory named temp
+venv/
 temp/ 
 code/logs
 code/experiments/logs

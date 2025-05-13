@@ -1,9 +1,4 @@
-"""
-Random strategy to distribute AI tasks in a MQTT network between different clients.
-This script is designed to work with the MQTT protocol and is intended to be run on a machine that acts as a task manager in a distributed system.
-It connects to an MQTT broker, subscribes to relevant topics, and distributes tasks to connected clients based on their availability.
-It also monitors the power consumption of the clients using Shelly devices and logs the results for analysis.
-"""
+
 import paho.mqtt.client as mqtt
 import os
 import re
@@ -122,25 +117,7 @@ def get_historical_mean_power_one_client(client_id):
    return historical_power_values.get(client_id, None) # the avg of every avg_power_value for this client
 
 def end_task_session(client_id, end_time):
-   """
-   Finalizes the task session for a given client, calculates energy consumption, 
-   and stores the resulting data.
 
-   This function is called when a client reports that it is ready. It calculates
-   the average power usage within the session's time window, determines energy 
-   consumption in kWh, and tracks efficiency metrics. 
-   The function also stores the resulting data in a global dataframe and clears the power tracking.
-
-   Args:
-      client_id (str): The unique identifier for the client whose task session is being finalized.
-      end_time (int): The Unix timestamp marking the end of the task session.
-
-   Returns:
-      None
-
-   Side Effect:
-      - Updates the global `df_client_power` dataframe with the calculated results.
-   """
    global df_client_power
    global df_idle_power
 
@@ -218,15 +195,7 @@ def end_task_session(client_id, end_time):
    del power_tracking[client_id]
 
 def aggregate_last_n_entries(n=5):
-   """
-   Aggregates the last `n` entries of a client and creates a new line with summed and averaged values.
-   
-   Parameters:
-      n (int): The number of recent entries to be used. it should correspond to the number of connected clients
-   
-   Returns:
-      pd.DataFrame: A DataFrame with the aggregated new row.
-   """
+ 
    global df_client_power
 
    # Select the last `n` lines for the specified client
@@ -266,25 +235,7 @@ def aggregate_last_n_entries(n=5):
    df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
 
 def load_tasks_from_file():
-   """
-   Loads tasks from a pre-generated file, assigns a sender and a random receiver to each task,
-   and populates the global task list with these tasks.
-
-   The function reads tasks from the file `generated_tasks.txt` located in the `taskGenerator` directory.
-   Each task is then extended with a sender and a randomly chosen receiver (from the list of 
-   connected clients). The tasks are stored in the global `task_list` variable.
-
-   Global Variables:
-      task_list (list): A list to store the tasks, each with a sender and receiver.
-      task_count (dict): A dictionary to keep track of the task count (not modified in this function).
-      timestamp_file (str): The file path for logging timestamps (not used in this function).
-      finisher_counter (int): Counter for completed tasks, initialized to 0.
-      clients_with_tasks (int): Counter for clients with tasks, initialized to 0.
-      task_num (int): The total number of tasks loaded from the file.
-
-   Exceptions:
-      If the file `generated_tasks.txt` is not found or cannot be read, an error message is printed.
-   """
+  
    global task_list
    global task_count
    global timestamp_file
@@ -335,35 +286,7 @@ def find_receiver(task):
 # distrbute available tasks randomly to the connected clients
 # the ❤️ of the distribution!!!!!
 def distribute_tasks(client):
-   """
-   Distributes tasks from the global task list to connected clients.
-
-   This function continuously checks the availability of connected clients and tasks in the task list. 
-   It assigns tasks to clients based on the receiver specified in the task and sends the tasks to the appropriate 
-   connected client. If a client is not connected, the task is skipped. The tasks for each client are grouped together 
-   before being sent to the target client. The function also tracks the number of tasks assigned to each client.
-
-   The task distribution is performed in a loop, which continues until a stop event is triggered. A small delay 
-   is included between task distributions to avoid overwhelming the MQTT system.
-
-   Args:
-      client: The MQTT client instance used to publish task information to clients.
-
-   Global Variables:
-      task_list (list): A list of tasks available for distribution.
-      clients_with_tasks (int): Counter tracking the number of clients that have received tasks.
-      task_count (dict): A dictionary storing the count of tasks assigned to each client.
-      start_distribution (float): Timestamp marking the start of task distribution.
-
-   Behavior:
-      - The function waits for new tasks if the task list is empty or no clients are connected.
-      - Tasks are grouped based on the receiver and sent to the connected client.
-      - If a client is not connected, the task is skipped, and the function continues to the next task.
-      - Each client is assigned a task session for measurement tracking once tasks are sent.
-
-   Exceptions:
-      - No specific exceptions are raised, but tasks are skipped if no clients are connected or if a task cannot be sent to the target client.
-   """
+  
    global task_list
    global clients_with_tasks
    global task_count
@@ -451,21 +374,7 @@ def on_connect(client, userdata, flags, rc):
    client.subscribe("finish/#")
 
 def get_shelly_apower_data_status_switch(topic, message):
-   """
-   ONLY FOR ANALYSIS!!!
-   Processes the power data received from the Shelly device when the status switch is triggered.
-   Change this according to your monitoring device!
-   
-   Parses the incoming message for power usage data (`apower`) and records the data for the client.
-   Handles error cases for missing or malformed data.
-
-   Args:
-      topic (str): The topic from which the message was received.
-      message (str): The message containing the power usage data.
-
-   Returns:
-      None
-   """
+ 
    # Parse the client ID from the topic
    client_id_json = topic.split("/")[1]
 
@@ -491,21 +400,7 @@ def get_shelly_apower_data_status_switch(topic, message):
             print(f"Unexpected error when processing {topic}: {e}")
 
 def get_shelly_apower_data_events(topic, message):
-   """
-   ONLY FOR ANALYSIS!!!
-   Processes the power data received from the Shelly device.
-   Change this according to your monitoring device!
    
-   Extracts the `apower` value from the message, records it, and prints relevant information.
-   Handles error cases for missing or malformed data.
-
-   Args:
-      topic (str): The topic from which the message was received.
-      message (str): The message containing the power usage data.
-
-   Returns:
-      None
-   """
    # Parse the client ID from the topic
    client_id_json = topic.split("/")[1]
 
@@ -536,10 +431,7 @@ def get_shelly_apower_data_events(topic, message):
             print(f"Unexpected error when processing {topic}: {e}")
 
 def handle_idle_clients(duration):
-   """
-   ONLY FOR ANALYSIS!!!
-   Handle clients that have no tasks assigned and fill idle values.
-   """
+  
    global df_client_power
    global df_idle_power
 
@@ -577,9 +469,7 @@ def handle_idle_clients(duration):
          print(f"Added Idle Data for {client_id}: {new_data.to_dict(orient='records')}")
 
 def on_message(client, userdata, msg):
-   """
-   Callback when a message is received from the broker.
-   """
+   
    global task_list
    global task_count
    global finisher_counter
