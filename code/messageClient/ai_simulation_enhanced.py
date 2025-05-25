@@ -263,7 +263,7 @@ def task_worker():
                 client_id, 
                 hostArch,
                 sub_process_method="sequential")
-            client.publish(MQTT_Topic_Results, client_id + ': This is a result indication! I have processed the ann request.')
+            client.publish(MQTT_Topic_Results, f"{client_id}: scenario={scenario} - Task executed.")
             print(f"Task {scenario} executed by {client_id}.")
         task_queue.task_done()
 

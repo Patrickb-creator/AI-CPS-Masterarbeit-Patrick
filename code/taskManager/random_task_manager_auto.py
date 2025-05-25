@@ -62,7 +62,9 @@ task_timing = defaultdict(list)
 # Create an empty DataFrame to store the consumption data
 # This is only for the analysis in experiments!!!
 columns = [
+   "round",
    "client_id", 
+   "scenario", # Scenario is the name of the experiment, e.g. "apply", "create" or "refine"
    "total_power_usage", 
    "kwh",
    "relevant_power_values",
@@ -71,7 +73,7 @@ columns = [
    "efficiency_per_task", # power in watt per task
    "efficiency", # efficiency in tasks per kWh
    "total_duration", 
-   "time_per_task"]
+   "time_per_task",]
 
 df_client_power = pd.DataFrame(columns=columns)
 
@@ -97,12 +99,27 @@ def get_broker_ip_via_file():
       print(f"File {ip_file} not found")
 
 def start_task_session(client_id):
-   """
-   Initializes a new measurement series for a client
-   """
-   power_tracking[client_id] = []  # Empty list for measured current values
-   task_count[client_id] = 0  # Reset task number
-   task_timing[client_id].append({"start_time": time.time()})  # Save start time
+    """
+    Initializes a new measurement series for a client for ONE task
+    """
+    # Power-Messung: leere Liste erzeugen oder anhängen
+    if client_id not in power_tracking:
+        power_tracking[client_id] = []
+    # Task-Zähler initialisieren (optional – ggf. entfernen, falls du nur pro Runde zählst)
+    if client_id not in task_count:
+        task_count[client_id] = 0
+    task_count[client_id] += 1
+
+    # Zeitmessung initialisieren
+    if client_id not in task_timing:
+        task_timing[client_id] = []
+
+    # Pro Task Startzeit und Runde merken
+    task_timing[client_id].append({
+        "start_time": time.time(),
+        "round": current_round
+    })
+
 
 def record_power_usage(client_id, power_value):
    """
@@ -118,6 +135,72 @@ def get_historical_mean_power_all_clients():
 def get_historical_mean_power_one_client(client_id):
    historical_power_values = get_historical_mean_power_all_clients()
    return historical_power_values.get(client_id, None) # the avg of every avg_power_value for this client
+
+def end_single_task_session(client_id, scenario, end_time):
+    global df_client_power
+
+    if client_id not in power_tracking:
+        print(f"No Power-Tracking for {client_id} found!")
+        return
+
+    if client_id not in task_timing or not task_timing[client_id]:
+        print(f"No timing information for {client_id}.")
+        return
+
+    # Letzte Task-Zeit holen & entfernen
+    timing = task_timing[client_id].pop()
+    start_time = timing["start_time"]
+    round_id = timing.get("round", current_round)  # Nutze aktuelle Runde wenn nicht anders gespeichert
+
+    relevant_power_values = [
+        power for timestamp, power in power_tracking[client_id]
+        if start_time <= timestamp <= end_time
+    ]
+
+    if relevant_power_values:
+        avg_power = float(np.mean(relevant_power_values))
+    else:
+        idle_power_value_list = df_idle_power.loc[df_idle_power['client_id'] == client_id, 'idle_power_value'].values
+        avg_power = float(idle_power_value_list[0]) if len(idle_power_value_list) > 0 else 0.0
+
+    total_duration = end_time - start_time
+    
+      # Summe aller vorherigen time_per_task-Einträge für diesen Client & Runde
+    previous_tasks = df_client_power[
+        (df_client_power["client_id"] == client_id) &
+        (df_client_power["round"] == round_id)
+    ]
+
+    previous_time_sum = previous_tasks["time_per_task"].sum() if not previous_tasks.empty else 0
+    time_per_task = (end_time - start_time) - previous_time_sum
+    if time_per_task <= 0:
+        time_per_task = total_duration  # Fallback falls was schiefgeht
+        
+    total_power_usage = avg_power * total_duration
+    kwh = total_power_usage / 3600000
+
+    new_data = pd.DataFrame([{
+        "round": round_id,
+        "client_id": client_id,
+        "scenario": scenario,
+        "total_power_usage": total_power_usage,
+        "kwh": kwh,
+        "avg_power": avg_power,
+        "relevant_power_values": relevant_power_values,
+        "num_of_power_values": len(relevant_power_values),
+        "tasks_assigned": 1,
+        "efficiency_per_task": kwh,
+        "efficiency": 1 / kwh if kwh > 0 else 0,
+        "total_duration": total_duration,
+        "time_per_task": time_per_task,
+    }])
+
+    df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+    print(f"📊 Einzelne Aufgabe gespeichert für {client_id}: {scenario}, Runde {round_id}")
+    
+    print(f"✅ Save Data for {client_id}: {new_data.to_dict(orient='records')}")
+
+
 
 def end_task_session(client_id, end_time):
 
@@ -197,45 +280,49 @@ def end_task_session(client_id, end_time):
    # Empty memory for the next measurement
    del power_tracking[client_id]
 
-def aggregate_last_n_entries(n=5):
- 
-   global df_client_power
+def aggregate_round_entries(round_number):
+    global df_client_power
 
-   # Select the last `n` lines for the specified client
-   last_n_entries = df_client_power.tail(n)
+    # Filter für aktuelle Runde
+    round_entries = df_client_power[df_client_power["round"] == round_number]
 
-   if last_n_entries.empty:
-      print("No last entries found.")
-      return None  # return empty dataframe row
+    if round_entries.empty:
+        print(f"⚠️ Keine Einträge für Runde {round_number} gefunden.")
+        return
 
-   # calculate sums and means of the values
-   total_power = last_n_entries["total_power_usage"].sum()
-   avg_power = total_power / n
-   total_tasks = last_n_entries["tasks_assigned"].sum()
-   total_power_values = last_n_entries["num_of_power_values"].sum()
-   total_kwh = last_n_entries["kwh"].sum() # kwh summiert für das gesamte Netzwerk -> danach dann verteilen, immer an den mehr aufgaben, der am ende weniger kwh verbraucht hat
-   
-   avg_efficiency_per_task = last_n_entries["efficiency_per_task"].mean()
-   avg_inv_efficiency = last_n_entries["efficiency"].mean()
-   avg_time_per_task = last_n_entries["time_per_task"].mean()
-   avg_duration = last_n_entries["total_duration"].mean()
+    # Aggregation
+    total_power = round_entries["total_power_usage"].sum()
+    avg_power = total_power / len(round_entries)
+    total_tasks = round_entries["tasks_assigned"].sum()
+    total_power_values = round_entries["num_of_power_values"].sum()
+    total_kwh = round_entries["kwh"].sum()
 
-   # Create new df row with aggregated data
-   new_data = pd.DataFrame([{
-      "client_id": 0,
-      "total_power_usage": total_power,
-      "avg_power": avg_power, # avg_power of the network
-      "kwh": total_kwh, # power for the whole network
-      "relevant_power_values": None,
-      "num_of_power_values": total_power_values, 
-      "tasks_assigned": total_tasks,
-      "efficiency_per_task": avg_efficiency_per_task,
-      "efficiency": avg_inv_efficiency,
-      "total_duration": avg_duration,
-      "time_per_task": avg_time_per_task
-   }])
+    avg_efficiency_per_task = round_entries["efficiency_per_task"].mean()
+    avg_inv_efficiency = round_entries["efficiency"].mean()
+    avg_time_per_task = round_entries["time_per_task"].mean()
+    avg_duration = round_entries["total_duration"].max()
 
-   df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+    # Neue Zeile mit Aggregatsdaten
+    aggregated_row = pd.DataFrame([{
+        "client_id": 0,
+        "scenario": "",  # leer lassen
+        "round": round_number,
+        "total_power_usage": total_power,
+        "avg_power": avg_power,
+        "kwh": total_kwh,
+        "relevant_power_values": None,
+        "num_of_power_values": total_power_values,
+        "tasks_assigned": total_tasks,
+        "efficiency_per_task": avg_efficiency_per_task,
+        "efficiency": avg_inv_efficiency,
+        "total_duration": avg_duration,
+        "time_per_task": avg_time_per_task
+    }])
+
+    # Anhängen
+    df_client_power = pd.concat([df_client_power, aggregated_row], ignore_index=True)
+    print(f"📊 Aggregierte Daten für Runde {round_number} hinzugefügt.")
+
 
 def load_tasks_from_file():
   
@@ -352,7 +439,11 @@ def distribute_tasks(client):
             if target_client in connected_clients:
                 client.publish("start_stop/taskWorker", 1, qos=1)
                 client.publish(f"tasks/{target_client}", task_string, qos=1)
-                start_task_session(target_client)
+
+                # 🛠️ WICHTIG: Für jede einzelne Aufgabe Startzeit registrieren
+                for _ in combined_tasks:
+                    start_task_session(target_client)
+
                 task_count[target_client] = len(combined_tasks)
                 local_clients_with_tasks += 1
                 start_distribution = time.time()
@@ -368,6 +459,7 @@ def distribute_tasks(client):
 
         clients_with_tasks = local_clients_with_tasks
         task_event.clear()
+
 
 
 # Monitor active clients
@@ -522,6 +614,19 @@ def on_message(client, userdata, msg):
             connected_clients.discard(client_name)
         elif "Connected" in message:
             connected_clients.add(client_name)
+          # 🟦 Einzelne Task-Ergebnisse (laufen NICHT über finish/, sondern mqttTester/results)
+          
+    elif topic == "mqttTester/results":
+        if "Task executed" in message and "scenario=" in message:
+            print("📥 Eingehende Task-Ausführungs-Meldung:", message)
+
+            match = re.match(r"(\w+): scenario=(\w+)_\w+", message)
+            if match:
+                client_id = match.group(1)
+                scenario = match.group(2)
+                end_time = time.time()
+                end_single_task_session(client_id, scenario, end_time)
+
 
     # 🟩 Task-Finish-Meldungen
     elif topic.startswith("finish/"):
@@ -530,8 +635,9 @@ def on_message(client, userdata, msg):
             finished_client = message.split(" ")[1]
             client_status[finished_client] = 0
             end_time = time.time()
-            end_task_session(finished_client, end_time)
-
+            #end_task_session(finished_client, end_time)
+            
+            
         if clients_with_tasks == finisher_counter:
             stop_distribution = time.time()
             print(f"✅ Runde {current_round} abgeschlossen: {finisher_counter}/{task_num} Tasks erledigt")
@@ -542,7 +648,7 @@ def on_message(client, userdata, msg):
             # Analyse und Logging
             duration = stop_distribution - start_distribution
             handle_idle_clients(duration)
-            aggregate_last_n_entries(len(connected_clients))
+            aggregate_round_entries(current_round)
             task_count.clear()
 
             # CSV-Export
