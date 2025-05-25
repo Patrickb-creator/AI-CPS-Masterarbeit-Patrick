@@ -12,7 +12,6 @@ code/messageClient/logs
 code/messageClient/code/messageClient
 code/taskManager/logs
 code/taskManager/power_logs_green
-code/messageClient/client_id
-**/client_id
+code/messageClient/client_id.txt
 code/otherTaskGenerators
 power_data_analysis
