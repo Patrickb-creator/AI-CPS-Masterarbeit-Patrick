@@ -16,3 +16,4 @@ code/messageClient/client_id.txt
 code/otherTaskGenerators
 power_data_analysis
 code/CSV_Auswertung.ipynb
+code/taskGenerator/generated_tasks.txt
