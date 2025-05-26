@@ -273,6 +273,20 @@ def task_worker():
             client.publish("result/status/" + client_id, 0)
             client.publish("finish/" + client_id, f"Finished {client_id}")
             print(completion_message)
+            
+            
+def status_printer():
+    """
+    Prints a status message every 5 seconds while there are tasks in the queue.
+    """
+    while True:
+        if not task_queue.empty():
+            print("Aufgabe wird berechnet...")
+            time.sleep(5)
+        else:
+            time.sleep(1)  # Weniger CPU-Last im Leerlauf
+
+
 
 def unroll_message(message):
     """
@@ -355,6 +369,10 @@ if __name__ == '__main__':
     # Start the task worker thread
     task_worker_thread = threading.Thread(target=task_worker, daemon=True)
     task_worker_thread.start()
+    
+        # Start the status printer thread
+    status_thread = threading.Thread(target=status_printer, daemon=True)
+    status_thread.start()
 
     # Start listening here
     try:
