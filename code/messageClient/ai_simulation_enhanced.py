@@ -281,7 +281,7 @@ def status_printer():
     """
     while True:
         if not task_queue.empty():
-            print("Aufgabe wird berechnet...")
+            print("Aufgabe wird berechnet...", flush=True)
             time.sleep(5)
         else:
             time.sleep(1)  # Weniger CPU-Last im Leerlauf
