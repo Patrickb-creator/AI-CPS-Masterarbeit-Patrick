@@ -264,7 +264,7 @@ def task_worker():
                 hostArch,
                 sub_process_method="sequential")
             client.publish(MQTT_Topic_Results, f"{client_id}: scenario={scenario} - Task executed.")
-            print(f"Task {scenario} executed by {client_id}.")
+            print(f"Task {scenario} executed by {client_id}.", flush=True)
         task_queue.task_done()
 
         if task_queue.empty():

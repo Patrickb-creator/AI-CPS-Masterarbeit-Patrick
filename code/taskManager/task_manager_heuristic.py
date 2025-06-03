@@ -9,10 +9,6 @@ import pandas as pd
 import numpy as np
 import json
 from collections import defaultdict
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split
-import joblib
 
 # Add the parent directory (where "taskGenerator" is) to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,11 +30,9 @@ current_round = 1
 max_round = 1
 round_task_dict = {}
 task_records = []
-trained_model = None
-model_loaded = False
-model_available = False
-ml_model = None
-ml_encoder = None
+GREEDY_START_ROUND = 6
+last_logged_random_round = 0
+last_logged_greedy_round = 0
 
 
 
@@ -410,97 +404,40 @@ def extract_features_from_task(task_string):
     return features
 
 
-def train_receiver_model(df_power, task_records):
+def assign_task_to_client_greedy(task_string, candidate_clients, current_round):
     """
-    Trainiert ein Modell zur Vorhersage der besten Clients basierend auf Task-Effizienz.
-    df_power: DataFrame mit Effizienz-Daten
-    task_records: Liste von dicts mit Task-Features und zugeordnetem Client
-
-    Speichert das Modell als 'receiver_model.pkl'
+    Weist die Aufgabe anhand eines load-aware greedy Algorithmus zu.
     """
-    # Verbinde Task-Feature-Infos mit Power-Daten
-    training_data = []
-    for entry in task_records:
-        client_id = entry["client_id"]
-        task_info = entry["task_features"]
-
-        power_entry = df_power[df_power["client_id"] == client_id].iloc[-1:]  # letzter Datensatz
-        if power_entry.empty:
-            continue
-
-        features = {
-            "scenario": task_info.get("scenario", "unknown"),
-            "efficiency": power_entry["efficiency"].values[0],  # Tasks/kWh
-        }
-        training_data.append(features)
-
-    df_train = pd.DataFrame(training_data)
-
-    # One-Hot Encoding für kategorische Features
-    enc = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-    X = enc.fit_transform(df_train[["scenario"]])
-    y = df_train["efficiency"].values
-
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-
-    # Speichern
-    joblib.dump((model, enc), "receiver_model.pkl")
-    print("📈 ML-Modell gespeichert als 'receiver_model.pkl'")
-
-
-def load_model_once():
-    global model_loaded, model_available, ml_model, ml_encoder
-    if model_loaded:
-        return
-
-    try:
-        ml_model, ml_encoder = joblib.load("receiver_model.pkl")
-        model_available = True
-    except:
-        print("⚠️ Kein trainiertes Modell vorhanden – verwende zufällige Auswahl.")
-        model_available = False
-
-    model_loaded = True
-
-
-
-def predict_best_receiver(task_string, candidate_clients):
     
-    global ml_model, ml_encoder
+    candidate_clients = list(candidate_clients)
+    
+    scenario = extract_features_from_task(task_string)["scenario"]
 
-    """
-    Nutzt das ML-Modell, um den besten Client aus der Liste vorherzusagen.
-    """
-    load_model_once()
+    efficiencies = []
 
-    if not model_available:
-        return random.choice(list(candidate_clients))
-
-    features = extract_features_from_task(task_string)
-
-    # Für logging/debugging
-    known_scenarios = ml_encoder.categories_[0]
-    if features["scenario"] not in known_scenarios:
-        print(f"⚠️ Unbekanntes Szenario '{features['scenario']}' – wird ignoriert, aber Modell bleibt stabil.")
-
-    X_input = pd.DataFrame([features])
-    X_new = ml_encoder.transform(X_input)
-
-    predicted_efficiency = ml_model.predict(X_new)[0]
-
-    client_efficiencies = {}
     for client in candidate_clients:
-        client_df = df_client_power[df_client_power["client_id"] == client]
-        if client_df.empty:
-            continue
-        client_eff = client_df["efficiency"].iloc[-1]
-        client_efficiencies[client] = abs(client_eff - predicted_efficiency)
+        client_tasks = df_client_power[
+            (df_client_power["client_id"] == client) &
+            (df_client_power["round"] < current_round) &
+            (df_client_power["scenario"] == scenario)
+        ]
 
-    if client_efficiencies:
-        return min(client_efficiencies, key=client_efficiencies.get)
+        if not client_tasks.empty:
+            avg_eff = client_tasks["efficiency"].mean()
+        else:
+            avg_eff = 0  # Fallback bei fehlenden Daten
+
+        efficiencies.append((client, avg_eff))
+
+    sorted_clients = sorted(efficiencies, key=lambda x: x[1], reverse=True)
+
+    if sorted_clients and sorted_clients[0][1] > 0:
+        selected_client = sorted_clients[0][0]
     else:
-        return random.choice(list(candidate_clients))
+        selected_client = random.choice(candidate_clients)  # Fallback
+
+    print(f"⚙️ [Greedy] Runde {current_round} – Aufgabe zugewiesen an {selected_client}")
+    return selected_client
 
 
 
@@ -543,30 +480,25 @@ def distribute_tasks(client):
                 task_event.clear()
                 continue
 
-        local_clients_with_tasks = 0
-
-        while True:
-            with task_lock:
-                if not task_list:
-                    break
-                task = task_list.pop(0)
-
+        # 1. Zuweisung: Für jede Aufgabe den Empfänger bestimmen und Aufgaben pro Client sammeln
+        client_tasks = defaultdict(list)
+        for task in task_list:
             round_match = re.search(r'round=(\d+)', task)
             round_number = int(round_match.group(1)) if round_match else current_round
 
             # Logging der Verteilstrategie
-            if round_number == 1 and last_logged_round != 1:
-                print("Runde 1 - Zufällige Verteilung")
-                last_logged_round = 1
-            elif round_number > 1 and last_logged_round != round_number:
-                print(f"Runde {round_number} - ML Verteilung")
+            if round_number < GREEDY_START_ROUND and last_logged_round != round_number:
+                print(f"Runde {round_number} - Zufällige Verteilung")
+                last_logged_round = round_number
+            elif round_number >= GREEDY_START_ROUND and last_logged_round != round_number:
+                print(f"Runde {round_number} - Greedy Verteilung")
                 last_logged_round = round_number
 
             # Empfänger bestimmen
-            if round_number == 1:
+            if round_number < GREEDY_START_ROUND:
                 target_client = random.choice(list(connected_clients))
             else:
-                target_client = predict_best_receiver(task, connected_clients)
+                target_client = assign_task_to_client_greedy(task, connected_clients, round_number)
 
             # Empfänger in den Task-String einfügen
             if "receiver=" not in task:
@@ -574,51 +506,33 @@ def distribute_tasks(client):
             else:
                 task_with_receiver = re.sub(r'receiver=[^,"]*', f'receiver={target_client}', task)
 
-            # Kombiniere alle Aufgaben für diesen Client
-            combined_tasks = [task_with_receiver]
-            i = 0
-            while i < len(task_list):
-                with task_lock:
-                    next_task = task_list[i]
-                    next_round_match = re.search(r'round=(\d+)', next_task)
-                    next_round_number = int(next_round_match.group(1)) if next_round_match else current_round
+            client_tasks[target_client].append(task_with_receiver)
 
-                    if next_round_number == 1:
-                        next_client = random.choice(list(connected_clients))
-                    else:
-                        next_client = predict_best_receiver(next_task, connected_clients)
-
-                    if next_client == target_client:
-                        if "receiver=" not in next_task:
-                            next_task_with_receiver = next_task.rstrip('"') + f", receiver={next_client}\""
-                        else:
-                            next_task_with_receiver = re.sub(r'receiver=[^,"]*', f'receiver={next_client}', next_task)
-                        combined_tasks.append(next_task_with_receiver)
-                        task_list.pop(i)
-                    else:
-                        i += 1
-
+        # 2. Versand: Aufgaben gesammelt pro Client verschicken
+        local_clients_with_tasks = 0
+        for target_client, tasks in client_tasks.items():
             task_string = "\n".join([
                 re.sub(r"round=\d+,\s*", "", t)
-                for t in combined_tasks
+                for t in tasks
             ])
 
             if target_client in connected_clients:
                 client.publish("start_stop/taskWorker", 1, qos=1)
                 client.publish(f"tasks/{target_client}", task_string, qos=1)
 
-                for _ in combined_tasks:
+                for _ in tasks:
                     start_task_session(target_client)
 
-                task_count[target_client] = len(combined_tasks)
+                task_count[target_client] = len(tasks)
                 local_clients_with_tasks += 1
                 start_distribution = time.time()
-                print(f"📦 Verteilte {len(combined_tasks)} Aufgaben an {target_client}")
+                print(f"📦 Verteilte {len(tasks)} Aufgaben an {target_client}")
             else:
                 print(f"⚠️ Ziel-Client {target_client} nicht verbunden. Überspringe.")
 
             time.sleep(2)
 
+        # ✅ Jetzt erst: Leere die Aufgaben der aktuellen Runde!
         with task_lock:
             round_task_dict[current_round] = []
 
@@ -818,7 +732,7 @@ def on_message(client, userdata, msg):
 
             # CSV-Export
             script_dir = os.path.dirname(os.path.realpath(__file__))
-            log_directory_power = os.path.join(script_dir, "power_logs_ml")
+            log_directory_power = os.path.join(script_dir, "power_logs_heuristic")
             os.makedirs(log_directory_power, exist_ok=True)
             timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
             file_path = os.path.join(log_directory_power, f"{timestamp}_power-log-random_{task_num}.csv")
@@ -826,17 +740,19 @@ def on_message(client, userdata, msg):
             with write_to_power_log_lock:
                 df_client_power.to_csv(file_path, index=False, encoding="utf-8")
                 
-            if len(task_records) >= 5:
-                train_receiver_model(df_client_power, task_records)
-            else:
-                print("⚠️ Noch zu wenig Daten zum Trainieren des ML-Modells.")
 
             # ⬇️ Starte nächste Runde
             current_round += 1
             finisher_counter = 0
             clients_with_tasks = 0
 
-            if current_round in round_task_dict and round_task_dict[current_round]:
+            next_round = current_round
+            
+            while next_round in round_task_dict and not round_task_dict[next_round]:
+                next_round += 1
+
+            if next_round in round_task_dict and round_task_dict[next_round]:
+                current_round = next_round
                 print(f"🚀 Starte Runde {current_round}")
                 task_event.set()
             else:

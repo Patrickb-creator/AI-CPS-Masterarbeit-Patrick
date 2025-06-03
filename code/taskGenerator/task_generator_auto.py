@@ -102,7 +102,7 @@ def task_generator(num_rounds, tasks_per_round, MQTT_topic, host, client, MQTT_U
         "apply_annSolution"
     ,
         "create_annSolution",
-        "refine_annSolution",
+       "refine_annSolution",
     ] #SPÄTER WIEDER REIN
 
     global experiment_num_tracker
