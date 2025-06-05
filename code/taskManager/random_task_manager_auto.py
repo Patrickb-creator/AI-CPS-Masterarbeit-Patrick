@@ -27,6 +27,8 @@ MQTT_Result_Topic = "mqttTester/results"
 MQTT_Task_Generator_Topic = "task_generator"
 connected_clients = set()  # unique set of connected PCs
 clients_with_tasks = 0
+client_task_done_counter = {}  # Neu: wie viele Tasks ein Client abgeschlossen hat
+client_idle_start_time = {}    # Neu: wann ein Client idle geworden ist
 current_round = 1
 max_round = 1
 round_task_dict = {}
@@ -125,8 +127,7 @@ def record_power_usage(client_id, power_value):
    """
    Saves individual power consumption values during processing
    """
-   if client_id in task_timing and task_timing[client_id]:  # Start task
-      power_tracking[client_id].append((time.time(), power_value))  # Save time stamps
+   power_tracking[client_id].append((time.time(), power_value))
 
 def get_historical_mean_power_all_clients():
    average_last_avg_power = df_client_power.groupby("client_id")["avg_power"].mean()
@@ -138,6 +139,9 @@ def get_historical_mean_power_one_client(client_id):
 
 def end_single_task_session(client_id, scenario, end_time):
     global df_client_power
+    global client_task_done_counter
+    global client_idle_start_time
+
 
     if client_id not in power_tracking:
         print(f"No Power-Tracking for {client_id} found!")
@@ -178,6 +182,20 @@ def end_single_task_session(client_id, scenario, end_time):
         
     total_power_usage = avg_power * total_duration
     kwh = total_power_usage / 3600000
+    
+    # 🔁 Client-Task-Zähler erhöhen
+    client_task_done_counter[client_id] = client_task_done_counter.get(client_id, 0) + 1
+
+    # 🟡 Wenn dieser Client alle ihm zugewiesenen Tasks erledigt hat
+    if (
+        task_count.get(client_id, 0) > 0 and
+        client_task_done_counter[client_id] == task_count[client_id] and
+        finisher_counter < clients_with_tasks
+    ):
+        # ⏱️ Zeitpunkt speichern, ab wann dieser Client im Idle-Modus ist
+        client_idle_start_time[client_id] = end_time
+        print(f"🟡 Client {client_id} ist jetzt idle (alle Tasks erledigt)")
+
 
     new_data = pd.DataFrame([{
         "round": round_id,
@@ -546,44 +564,95 @@ def get_shelly_apower_data_events(topic, message):
       except Exception as e:
             print(f"Unexpected error when processing {topic}: {e}")
 
-def handle_idle_clients(duration):
-  
-   global df_client_power
-   global df_idle_power
+def handle_idle_clients(duration, stop_time):
+    global df_client_power
+    global power_tracking
+    global client_idle_start_time
+    global task_count
+    global connected_clients
 
-   for client_id in client_ids:  # Iterate through the client_ids
-      # Check if the client is not listed in the task_count or has no tasks assigned
-      if task_count.get(client_id, 0) == 0 or client_id not in task_count:
-         # Get the idle power value from the df_idle_power DataFrame
-         idle_power_value_list = df_idle_power.loc[df_idle_power['client_id'] == client_id, 'idle_power_value'].values
-      
-         # Check if there's a valid idle_power_value
-         if len(idle_power_value_list) > 0 and idle_power_value_list[0] is not None:
-            idle_power_value = float(idle_power_value_list[0])
-         else:
-            print(f"No valid idle power value for client {client_id}. Using default value.")
-            idle_power_value = 0.0  # Set to a default value if None
+    print(f"handle_idle_clients gestartet mit duration={duration:.2f}")
+    print(f"connected_clients: {list(connected_clients)}")
+    print(f"task_count keys: {list(task_count.keys())}")
+    print(f"client_idle_start_time keys: {list(client_idle_start_time.keys())}")
+    print(f"Vor Einfügen: df_client_power Größe = {df_client_power.shape}")
 
-         # Create a new row for this client with idle power values
-         new_data = pd.DataFrame([{
-            "client_id": client_id,
-            "total_power_usage": idle_power_value * duration,
-            "avg_power": idle_power_value,  # Idle power is considered as average power
-            "kwh": (idle_power_value * duration) / 3600000,  # calculation to get kWh
-            "relevant_power_values": [idle_power_value],
-            "num_of_power_values": 1,  # Only one value (idle power)
-            "tasks_assigned": 0,  # No tasks assigned
-            "efficiency_per_task": 0,  ## Efficiency per task would be 0 as no tasks were assigned
-            "efficiency": 0,  # Efficiency would also be 0
-            "total_duration": duration,  # Placeholder for total duration (e.g., 1 hour for idle time)
-            "time_per_task": 0  # No tasks, so no time per task
-         }])
+    # 1) Alle relevanten Clients zusammenstellen:
+    #    – jene, die Tasks hatten (task_count.keys())
+    #    – jene, die schon idle geworden sind (client_idle_start_time.keys())
+    #    – alle verbundenen Clients (connected_clients)
+    client_ids_all = list(
+        set(task_count.keys())
+        | set(client_idle_start_time.keys())
+        | set(connected_clients)
+    )
+    print(f"Clients insgesamt: {client_ids_all}")
 
-         # Append this data to the DataFrame
-         df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+    # 2) Für jeden Client in client_ids_all prüfen, ob er unassigned oder early finisher ist
+    for cid in client_ids_all:
+        is_unassigned = cid not in task_count or task_count[cid] == 0
+        is_early_finisher = cid in client_idle_start_time
 
-         print(f"Added Idle Data for {client_id}: {new_data.to_dict(orient='records')}")
+        if not is_unassigned and not is_early_finisher:
+            print(f" → Überspringe Client '{cid}' (nicht unassigned oder early finisher)")
+            continue
 
+        if is_unassigned:
+            # Client hatte in dieser Runde gar keine Tasks → idle von Runde Beginn
+            idle_start = stop_time - duration  # ganze Rundendauer
+            idle_duration = duration
+            print(f" → Client '{cid}' (nie beauftragt), idle_duration = gesamte Runde: {idle_duration:.2f}s")
+        else:
+            # Client war früher fertig
+            idle_start = client_idle_start_time[cid]
+            idle_duration = (stop_time - idle_start)
+            print(f" → Client '{cid}' früh fertig, idle_duration = {idle_duration:.2f}s")
+
+        # 3) Echte Leistungswerte in Idle‐Fenster sammeln
+        relevant_power_values = [
+            power for ts, power in power_tracking.get(cid, [])
+            if idle_start <= ts <= stop_time
+        ]
+
+        if relevant_power_values:
+            avg_power = float(np.mean(relevant_power_values))
+            num_values = len(relevant_power_values)
+        else:
+            # Wenn wirklich gar keine Messdaten existieren, avg_power = 0
+            avg_power = 0.0
+            num_values = 0
+            print(f"⚠️ Keine Leistungswerte für Idle‐Zeit von Client '{cid}' gefunden!")
+
+        total_power_usage = avg_power * idle_duration
+        kwh = total_power_usage / 3600000
+
+        # 4) Neue IDLE‐Zeile erzeugen
+        new_data = pd.DataFrame([{
+            "round": current_round,
+            "client_id": cid,
+            "scenario": "IDLE",
+            "total_power_usage": total_power_usage,
+            "kwh": kwh,
+            "relevant_power_values": relevant_power_values,
+            "num_of_power_values": num_values,
+            "tasks_assigned": 0,
+            "efficiency_per_task": 0,
+            "efficiency": 0,
+            "total_duration": idle_duration,
+            "time_per_task": 0
+        }])
+
+        df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+        print(f"➕ Idle‐Zeit erfasst für '{cid}': {idle_duration:.2f}s, Verbrauch: {kwh:.6f} kWh, Werte: {num_values}")
+        print(f" → df_client_power Größe jetzt: {df_client_power.shape}")
+
+    print("✅ handle_idle_clients beendet")
+
+    # 5) Am Ende der Runde räumen wir die dynamischen Idle‐ und Task‐Zähler wieder leer:
+    client_idle_start_time.clear()
+    client_task_done_counter.clear()
+    
+    
 def on_message(client, userdata, msg):
     global task_list
     global task_count
@@ -647,13 +716,13 @@ def on_message(client, userdata, msg):
 
             # Analyse und Logging
             duration = stop_distribution - start_distribution
-            handle_idle_clients(duration)
+            handle_idle_clients(duration, stop_distribution)
             aggregate_round_entries(current_round)
             task_count.clear()
 
             # CSV-Export
             script_dir = os.path.dirname(os.path.realpath(__file__))
-            log_directory_power = os.path.join(script_dir, "power_logs_green")
+            log_directory_power = os.path.join(script_dir, "power_logs_random")
             os.makedirs(log_directory_power, exist_ok=True)
             timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
             file_path = os.path.join(log_directory_power, f"{timestamp}_power-log-random_{task_num}.csv")

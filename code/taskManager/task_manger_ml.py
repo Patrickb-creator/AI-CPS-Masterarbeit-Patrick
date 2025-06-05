@@ -9,9 +9,12 @@ import pandas as pd
 import numpy as np
 import json
 from collections import defaultdict
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.pipeline import make_pipeline
+from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
 import joblib
 
 # Add the parent directory (where "taskGenerator" is) to the Python path
@@ -34,9 +37,12 @@ current_round = 1
 max_round = 1
 round_task_dict = {}
 task_records = []
+client_task_done_counter = {}  # Neu: wie viele Tasks ein Client abgeschlossen hat
+client_idle_start_time = {}    # Neu: wann ein Client idle geworden ist
 trained_model = None
 model_loaded = False
 model_available = False
+scenario_model = None
 ml_model = None
 ml_encoder = None
 
@@ -77,6 +83,10 @@ columns = [
    "round",
    "client_id", 
    "scenario", # Scenario is the name of the experiment, e.g. "apply", "create" or "refine"
+   "knowledge_base",         # <--- hinzugefügt
+   "activation_base",        # <--- hinzugefügt
+   "code_base",              # <--- hinzugefügt
+   "learning_base",          # <--- hinzugefügt
    "total_power_usage", 
    "kwh",
    "relevant_power_values",
@@ -85,12 +95,13 @@ columns = [
    "efficiency_per_task", # power in watt per task
    "efficiency", # efficiency in tasks per kWh
    "total_duration", 
-   "time_per_task",]
+   "time_per_task",
+]
 
 df_client_power = pd.DataFrame(columns=columns)
 
 # This is needed when the client got no tasks
-client_ids = [] #"444626", "283436", "854514", "943099", "956975"
+client_ids = list(set(task_count.keys()) | set(client_idle_start_time.keys())) #"444626", "283436", "854514", "943099", "956975"
 idle_power_values = []  # Idle Power Values -> you have to collect them beforehand  11.36, 2.9, 11.315, 4.2, 72.7
 
 df_idle_power = pd.DataFrame({
@@ -137,8 +148,7 @@ def record_power_usage(client_id, power_value):
    """
    Saves individual power consumption values during processing
    """
-   if client_id in task_timing and task_timing[client_id]:  # Start task
-      power_tracking[client_id].append((time.time(), power_value))  # Save time stamps
+   power_tracking[client_id].append((time.time(), power_value))
 
 def get_historical_mean_power_all_clients():
    average_last_avg_power = df_client_power.groupby("client_id")["avg_power"].mean()
@@ -148,8 +158,13 @@ def get_historical_mean_power_one_client(client_id):
    historical_power_values = get_historical_mean_power_all_clients()
    return historical_power_values.get(client_id, None) # the avg of every avg_power_value for this client
 
-def end_single_task_session(client_id, scenario, end_time):
+def end_single_task_session(
+    client_id, scenario, end_time,
+    knowledge_base="-", activation_base="-", code_base="-", learning_base="-"
+):
     global df_client_power
+    global client_task_done_counter
+    global client_idle_start_time
 
     if client_id not in power_tracking:
         print(f"No Power-Tracking for {client_id} found!")
@@ -176,25 +191,39 @@ def end_single_task_session(client_id, scenario, end_time):
         avg_power = float(idle_power_value_list[0]) if len(idle_power_value_list) > 0 else 0.0
 
     total_duration = end_time - start_time
-    
-      # Summe aller vorherigen time_per_task-Einträge für diesen Client & Runde
     previous_tasks = df_client_power[
         (df_client_power["client_id"] == client_id) &
         (df_client_power["round"] == round_id)
     ]
-
     previous_time_sum = previous_tasks["time_per_task"].sum() if not previous_tasks.empty else 0
     time_per_task = (end_time - start_time) - previous_time_sum
     if time_per_task <= 0:
         time_per_task = total_duration  # Fallback falls was schiefgeht
-        
     total_power_usage = avg_power * total_duration
     kwh = total_power_usage / 3600000
 
+    # 🔁 Client-Task-Zähler erhöhen
+    client_task_done_counter[client_id] = client_task_done_counter.get(client_id, 0) + 1
+
+    # 🟡 Wenn dieser Client alle ihm zugewiesenen Tasks erledigt hat
+    if (
+        task_count.get(client_id, 0) > 0 and
+        client_task_done_counter[client_id] == task_count[client_id] and
+        finisher_counter < clients_with_tasks
+    ):
+        # ⏱️ Zeitpunkt speichern, ab wann dieser Client im Idle-Modus ist
+        client_idle_start_time[client_id] = end_time
+        print(f"🟡 Client {client_id} ist jetzt idle (alle Tasks erledigt)")
+
+    # 🔽 Messdaten speichern
     new_data = pd.DataFrame([{
         "round": round_id,
         "client_id": client_id,
         "scenario": scenario,
+        "knowledge_base": knowledge_base,
+        "activation_base": activation_base,
+        "code_base": code_base,
+        "learning_base": learning_base,
         "total_power_usage": total_power_usage,
         "kwh": kwh,
         "avg_power": avg_power,
@@ -208,10 +237,9 @@ def end_single_task_session(client_id, scenario, end_time):
     }])
 
     df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
-    print(f"📊 Einzelne Aufgabe gespeichert für {client_id}: {scenario}, Runde {round_id}")
-    
+    print(f"\U0001F4CA Einzelne Aufgabe gespeichert für {client_id}: {scenario}, Runde {round_id}")
     print(f"✅ Save Data for {client_id}: {new_data.to_dict(orient='records')}")
-    
+
     task_records.append({
         "round": round_id,
         "client_id": client_id,
@@ -222,11 +250,13 @@ def end_single_task_session(client_id, scenario, end_time):
         "efficiency_per_task": kwh,
         "time_per_task": time_per_task,
         "task_features": {
-            "scenario": scenario            
-    }
+            "scenario": scenario,
+            "knowledge_base": knowledge_base,
+            "activation_base": activation_base,
+            "code_base": code_base,
+            "learning_base": learning_base
+        }
     })
-
-
 
 def end_task_session(client_id, end_time):
 
@@ -328,10 +358,13 @@ def aggregate_round_entries(round_number):
     avg_time_per_task = round_entries["time_per_task"].mean()
     avg_duration = round_entries["total_duration"].max()
 
-    # Neue Zeile mit Aggregatsdaten
-    aggregated_row = pd.DataFrame([{
+    # Alle Spalten, die in df_client_power vorkommen
+    all_columns = set(df_client_power.columns)
+
+    # Standardwerte für die Aggregation
+    aggregated_data = {
         "client_id": 0,
-        "scenario": "",  # leer lassen
+        "scenario": "",
         "round": round_number,
         "total_power_usage": total_power,
         "avg_power": avg_power,
@@ -343,12 +376,19 @@ def aggregate_round_entries(round_number):
         "efficiency": avg_inv_efficiency,
         "total_duration": avg_duration,
         "time_per_task": avg_time_per_task
-    }])
+    }
+
+    # Füge alle weiteren Spalten mit np.nan hinzu, falls sie fehlen
+    for col in all_columns:
+        if col not in aggregated_data:
+            aggregated_data[col] = np.nan
+
+    # Neue Zeile mit Aggregatsdaten
+    aggregated_row = pd.DataFrame([aggregated_data])
 
     # Anhängen
     df_client_power = pd.concat([df_client_power, aggregated_row], ignore_index=True)
     print(f"📊 Aggregierte Daten für Runde {round_number} hinzugefügt.")
-
 
 def load_tasks_from_file():
     global round_task_dict
@@ -395,8 +435,6 @@ def load_tasks_from_file():
     except Exception as e:
         print(f"Fehler beim Laden von {task_file}: {e}")
 
-
-
 def extract_features_from_task(task_string):
     """
     Extrahiert Szenario und andere relevante Features aus dem Task-String.
@@ -404,101 +442,153 @@ def extract_features_from_task(task_string):
     """
     features = {}
 
-    scenario_match = re.search(r'scenario=([^,_]+)', task_string)
-    features["scenario"] = scenario_match.group(1) if scenario_match else "unknown"
+    # Scenario: nur der Teil vor dem ersten Unterstrich
+    scenario_match = re.search(r'scenario=([^\s,]+)', task_string)
+    if scenario_match:
+        scenario_full = scenario_match.group(1)
+        scenario = scenario_full.split('_')[0]  # nur der Teil vor dem ersten Unterstrich
+        features["scenario"] = scenario
+    else:
+        features["scenario"] = "unknown"
+
+    # Bases: alles zwischen = und dem nächsten Komma (ggf. mit Leerzeichen)
+    def extract_base(key):
+        match = re.search(rf'{key}=([^,]+)', task_string)
+        if match:
+            return match.group(1).strip()
+        else:
+            return "-"
+
+    features["knowledge_base"] = extract_base("knowledge_base")
+    features["activation_base"] = extract_base("activation_base")
+    features["code_base"] = extract_base("code_base")
+    features["learning_base"] = extract_base("learning_base")
 
     return features
 
 
-def train_receiver_model(df_power, task_records):
-    """
-    Trainiert ein Modell zur Vorhersage der besten Clients basierend auf Task-Effizienz.
-    df_power: DataFrame mit Effizienz-Daten
-    task_records: Liste von dicts mit Task-Features und zugeordnetem Client
+def train_receiver_model_rf(df_power):
+ 
+    df = df_power.copy()
 
-    Speichert das Modell als 'receiver_model.pkl'
-    """
-    # Verbinde Task-Feature-Infos mit Power-Daten
-    training_data = []
-    for entry in task_records:
-        client_id = entry["client_id"]
-        task_info = entry["task_features"]
+    # ❌ Nur echte Task-Zeilen
+    df = df[
+        (df["scenario"] != "IDLE") &
+        (df["client_id"] != 0) &
+        (df["tasks_assigned"] > 0)
+    ].copy()
 
-        power_entry = df_power[df_power["client_id"] == client_id].iloc[-1:]  # letzter Datensatz
-        if power_entry.empty:
-            continue
+    # 🔧 Feature Engineering
+    df["kwh_per_second"] = df["kwh"] / df["total_duration"].replace(0, 1)
+    df["kwh_per_task"] = df["kwh"] / df["tasks_assigned"].replace(0, 1)
+    df["power_per_task"] = df["avg_power"] / df["tasks_assigned"].replace(0, 1)
 
-        features = {
-            "scenario": task_info.get("scenario", "unknown"),
-            "efficiency": power_entry["efficiency"].values[0],  # Tasks/kWh
-        }
-        training_data.append(features)
+    # 🔁 IDLE-Kosten & Gesamtverbrauch
+    df_power["idle_kwh_flag"] = df_power["scenario"].apply(lambda x: 1 if x == "IDLE" else 0)
 
-    df_train = pd.DataFrame(training_data)
+    idle_kwh = (
+        df_power[df_power["idle_kwh_flag"] == 1]
+        .groupby(["round", "client_id"])["kwh"]
+        .sum()
+        .reset_index()
+        .rename(columns={"kwh": "idle_kwh"})
+    )
 
-    # One-Hot Encoding für kategorische Features
-    enc = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-    X = enc.fit_transform(df_train[["scenario"]])
-    y = df_train["efficiency"].values
+    total_kwh = (
+        df_power[df_power["client_id"] != 0]
+        .groupby(["round", "client_id"])["kwh"]
+        .sum()
+        .reset_index()
+        .rename(columns={"kwh": "round_total_kwh"})
+    )
 
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
+    # 🔗 Mergen
+    df = df.merge(idle_kwh, on=["round", "client_id"], how="left")
+    df = df.merge(total_kwh, on=["round", "client_id"], how="left")
 
-    # Speichern
-    joblib.dump((model, enc), "receiver_model.pkl")
-    print("📈 ML-Modell gespeichert als 'receiver_model.pkl'")
+    df["idle_kwh"] = df["idle_kwh"].fillna(0)
+    df["round_total_kwh"] = df["round_total_kwh"].fillna(df["kwh"])
+
+    # 📦 Input & Ziel
+    X = df[[
+        "scenario", "knowledge_base", "activation_base", "code_base", "learning_base",
+        "kwh", "avg_power", "total_duration", "tasks_assigned",
+        "kwh_per_second", "kwh_per_task", "power_per_task",
+        "idle_kwh", "round_total_kwh"
+    ]]
+    y = df["client_id"]
+
+    # 📊 Preprocessing
+    categorical_features = ["scenario", "knowledge_base", "activation_base", "code_base", "learning_base"]
+    numeric_features = [col for col in X.columns if col not in categorical_features]
+
+    preprocessor = ColumnTransformer([
+        ("cat", OneHotEncoder(handle_unknown='ignore'), categorical_features),
+        ("num", "passthrough", numeric_features)
+    ])
+
+    clf = make_pipeline(
+        preprocessor,
+        RandomForestClassifier(n_estimators=100, random_state=42)
+    )
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    clf.fit(X_train, y_train)
+
+    print("\n📈 Klassifikationsreport (Testdaten):\n")
+    print(classification_report(y_test, clf.predict(X_test)))
+
+    joblib.dump(clf, "receiver_model_rf.pkl")
+    print("✅ Random Forest Modell gespeichert als 'receiver_model_rf.pkl'")
+
 
 
 def load_model_once():
-    global model_loaded, model_available, ml_model, ml_encoder
+    global model_loaded, model_available, scenario_model
     if model_loaded:
         return
 
     try:
-        ml_model, ml_encoder = joblib.load("receiver_model.pkl")
+        scenario_model = joblib.load("receiver_model_rf.pkl")
         model_available = True
-    except:
-        print("⚠️ Kein trainiertes Modell vorhanden – verwende zufällige Auswahl.")
+    except Exception as e:
+        print(f"⚠️ Kein Random-Forest-Modell geladen – Fallback auf Zufall. Fehler: {e}")
         model_available = False
 
     model_loaded = True
 
-
-
 def predict_best_receiver(task_string, candidate_clients):
-    
-    global ml_model, ml_encoder
-
-    """
-    Nutzt das ML-Modell, um den besten Client aus der Liste vorherzusagen.
-    """
+    global scenario_model
     load_model_once()
 
-    if not model_available:
-        return random.choice(list(candidate_clients))
-
     features = extract_features_from_task(task_string)
+    dummy_numeric = {
+    "kwh": 0.001,
+    "avg_power": 10,
+    "total_duration": 10,
+    "tasks_assigned": 1,
+    "kwh_per_second": 0.0001,
+    "kwh_per_task": 0.0001,
+    "power_per_task": 10,
+    "round_total_kwh": 0.02,
+    "idle_kwh": 0.005,
+    "round_total_duration": 100,
+    "num_tasks_in_round": 10
+}
 
-    # Für logging/debugging
-    known_scenarios = ml_encoder.categories_[0]
-    if features["scenario"] not in known_scenarios:
-        print(f"⚠️ Unbekanntes Szenario '{features['scenario']}' – wird ignoriert, aber Modell bleibt stabil.")
+    X_input = {**features, **dummy_numeric}
+    X_df = pd.DataFrame([X_input])
 
-    X_input = pd.DataFrame([features])
-    X_new = ml_encoder.transform(X_input)
-
-    predicted_efficiency = ml_model.predict(X_new)[0]
-
-    client_efficiencies = {}
-    for client in candidate_clients:
-        client_df = df_client_power[df_client_power["client_id"] == client]
-        if client_df.empty:
-            continue
-        client_eff = client_df["efficiency"].iloc[-1]
-        client_efficiencies[client] = abs(client_eff - predicted_efficiency)
-
-    if client_efficiencies:
-        return min(client_efficiencies, key=client_efficiencies.get)
+    if model_available:
+        try:
+            prediction = scenario_model.predict(X_df)[0]
+            if prediction in candidate_clients:
+                return prediction
+            else:
+                return random.choice(list(candidate_clients))
+        except Exception as e:
+            print(f"⚠️ Prediction fehlgeschlagen: {e}")
+            return random.choice(list(candidate_clients))
     else:
         return random.choice(list(candidate_clients))
 
@@ -542,15 +632,9 @@ def distribute_tasks(client):
                 print("⚠️ task_list ist leer, Event wird zurückgesetzt.")
                 task_event.clear()
                 continue
-
-        local_clients_with_tasks = 0
-
-        while True:
-            with task_lock:
-                if not task_list:
-                    break
-                task = task_list.pop(0)
-
+        # 1. Zuweisung: Für jede Aufgabe den Empfänger bestimmen und Aufgaben pro Client sammeln
+        client_tasks = defaultdict(list)
+        for task in task_list:
             round_match = re.search(r'round=(\d+)', task)
             round_number = int(round_match.group(1)) if round_match else current_round
 
@@ -574,51 +658,33 @@ def distribute_tasks(client):
             else:
                 task_with_receiver = re.sub(r'receiver=[^,"]*', f'receiver={target_client}', task)
 
-            # Kombiniere alle Aufgaben für diesen Client
-            combined_tasks = [task_with_receiver]
-            i = 0
-            while i < len(task_list):
-                with task_lock:
-                    next_task = task_list[i]
-                    next_round_match = re.search(r'round=(\d+)', next_task)
-                    next_round_number = int(next_round_match.group(1)) if next_round_match else current_round
+            client_tasks[target_client].append(task_with_receiver)
 
-                    if next_round_number == 1:
-                        next_client = random.choice(list(connected_clients))
-                    else:
-                        next_client = predict_best_receiver(next_task, connected_clients)
-
-                    if next_client == target_client:
-                        if "receiver=" not in next_task:
-                            next_task_with_receiver = next_task.rstrip('"') + f", receiver={next_client}\""
-                        else:
-                            next_task_with_receiver = re.sub(r'receiver=[^,"]*', f'receiver={next_client}', next_task)
-                        combined_tasks.append(next_task_with_receiver)
-                        task_list.pop(i)
-                    else:
-                        i += 1
-
+        # 2. Versand: Aufgaben gesammelt pro Client verschicken
+        local_clients_with_tasks = 0
+        for target_client, tasks in client_tasks.items():
             task_string = "\n".join([
                 re.sub(r"round=\d+,\s*", "", t)
-                for t in combined_tasks
+                for t in tasks
             ])
 
             if target_client in connected_clients:
                 client.publish("start_stop/taskWorker", 1, qos=1)
                 client.publish(f"tasks/{target_client}", task_string, qos=1)
 
-                for _ in combined_tasks:
+                for _ in tasks:
                     start_task_session(target_client)
 
-                task_count[target_client] = len(combined_tasks)
+                task_count[target_client] = len(tasks)
                 local_clients_with_tasks += 1
                 start_distribution = time.time()
-                print(f"📦 Verteilte {len(combined_tasks)} Aufgaben an {target_client}")
+                print(f"📦 Verteilte {len(tasks)} Aufgaben an {target_client}")
             else:
                 print(f"⚠️ Ziel-Client {target_client} nicht verbunden. Überspringe.")
 
             time.sleep(2)
 
+        # ✅ Jetzt erst: Leere die Aufgaben der aktuellen Runde!
         with task_lock:
             round_task_dict[current_round] = []
 
@@ -711,43 +777,85 @@ def get_shelly_apower_data_events(topic, message):
       except Exception as e:
             print(f"Unexpected error when processing {topic}: {e}")
 
-def handle_idle_clients(duration):
-  
-   global df_client_power
-   global df_idle_power
+def handle_idle_clients(duration, stop_time):
+    global df_client_power
+    global power_tracking
+    global connected_clients
 
-   for client_id in client_ids:  # Iterate through the client_ids
-      # Check if the client is not listed in the task_count or has no tasks assigned
-      if task_count.get(client_id, 0) == 0 or client_id not in task_count:
-         # Get the idle power value from the df_idle_power DataFrame
-         idle_power_value_list = df_idle_power.loc[df_idle_power['client_id'] == client_id, 'idle_power_value'].values
-      
-         # Check if there's a valid idle_power_value
-         if len(idle_power_value_list) > 0 and idle_power_value_list[0] is not None:
-            idle_power_value = float(idle_power_value_list[0])
-         else:
-            print(f"No valid idle power value for client {client_id}. Using default value.")
-            idle_power_value = 0.0  # Set to a default value if None
+    client_ids = list(set(task_count.keys()) | set(client_idle_start_time.keys()) | set(connected_clients))
+    print(f"handle_idle_clients gestartet mit duration={duration:.2f}, stop_time={stop_time:.2f}")
+    print(f"Clients insgesamt: {client_ids}")
+    print(f"task_count keys: {list(task_count.keys())}")
+    print(f"client_idle_start_time keys: {list(client_idle_start_time.keys())}")
+    print(f"connected_clients: {list(connected_clients)}")
+    print(f"Vor dem Einfügen: df_client_power Größe = {df_client_power.shape}")
 
-         # Create a new row for this client with idle power values
-         new_data = pd.DataFrame([{
+    for client_id in client_ids:
+        is_unassigned = client_id not in task_count or task_count[client_id] == 0
+        is_early_finisher = client_id in client_idle_start_time
+
+        if not is_unassigned and not is_early_finisher:
+            print(f" → Überspringe Client '{client_id}' (nicht unassigned oder early finisher)")
+            continue
+
+        if is_unassigned:
+            idle_start = stop_time - duration  # ganze Runde
+            idle_duration = duration
+            print(f" → Client '{client_id}' unassigned, idle_duration = {idle_duration:.2f}s")
+        elif is_early_finisher:
+            idle_start = client_idle_start_time[client_id]
+            idle_duration = stop_time - idle_start
+            print(f" → Client '{client_id}' früh fertig, idle_duration = {idle_duration:.2f}s")
+        else:
+            continue  # sollte nie passieren
+
+        # Echte Messwerte in Idle-Zeit sammeln
+        relevant_power_values = [
+            power for timestamp, power in power_tracking.get(client_id, [])
+            if idle_start <= timestamp <= stop_time
+        ]
+
+        if relevant_power_values:
+            avg_power = float(np.mean(relevant_power_values))
+            num_values = len(relevant_power_values)
+        else:
+            avg_power = 0.0
+            num_values = 0
+            print(f"⚠️ Keine Leistungswerte für Idle-Zeit von Client '{client_id}' gefunden!")
+
+        total_power_usage = avg_power * idle_duration
+        kwh = total_power_usage / 3600000
+
+        new_data = pd.DataFrame([{
+            "round": current_round,
             "client_id": client_id,
-            "total_power_usage": idle_power_value * duration,
-            "avg_power": idle_power_value,  # Idle power is considered as average power
-            "kwh": (idle_power_value * duration) / 3600000,  # calculation to get kWh
-            "relevant_power_values": [idle_power_value],
-            "num_of_power_values": 1,  # Only one value (idle power)
-            "tasks_assigned": 0,  # No tasks assigned
-            "efficiency_per_task": 0,  ## Efficiency per task would be 0 as no tasks were assigned
-            "efficiency": 0,  # Efficiency would also be 0
-            "total_duration": duration,  # Placeholder for total duration (e.g., 1 hour for idle time)
-            "time_per_task": 0  # No tasks, so no time per task
-         }])
+            "scenario": "IDLE",
+            "knowledge_base": "-",
+            "activation_base": "-",
+            "code_base": "-",
+            "learning_base": "-",
+            "total_power_usage": total_power_usage,
+            "avg_power": avg_power,
+            "kwh": kwh,
+            "relevant_power_values": relevant_power_values,
+            "num_of_power_values": num_values,
+            "tasks_assigned": 0,
+            "efficiency_per_task": 0,
+            "efficiency": 0,
+            "total_duration": idle_duration,
+            "time_per_task": 0
+        }])
 
-         # Append this data to the DataFrame
-         df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+        df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+        print(f"➕ Idle-Zeit erfasst für '{client_id}': {idle_duration:.2f}s, Verbrauch: {kwh:.6f} kWh, Werte: {num_values}")
+        print(f" → df_client_power Größe jetzt: {df_client_power.shape}")
 
-         print(f"Added Idle Data for {client_id}: {new_data.to_dict(orient='records')}")
+    print("✅ handle_idle_clients beendet")
+    # Aufräumen
+    client_idle_start_time.clear()
+    client_task_done_counter.clear()
+
+
 
 def on_message(client, userdata, msg):
     global task_list
@@ -790,7 +898,21 @@ def on_message(client, userdata, msg):
                 client_id = match.group(1)
                 scenario = match.group(2)
                 end_time = time.time()
-                end_single_task_session(client_id, scenario, end_time)
+
+                # Bases extrahieren
+                def extract_base(key):
+                    m = re.search(rf'{key}=([^,]+?)(?:,| - Task executed|$)', message)
+                    return m.group(1).strip() if m else "-"
+
+                knowledge_base = extract_base("knowledge_base")
+                activation_base = extract_base("activation_base")
+                code_base = extract_base("code_base")
+                learning_base = extract_base("learning_base")
+
+                end_single_task_session(
+                    client_id, scenario, end_time,
+                    knowledge_base, activation_base, code_base, learning_base
+                )
 
 
     # 🟩 Task-Finish-Meldungen
@@ -812,7 +934,7 @@ def on_message(client, userdata, msg):
 
             # Analyse und Logging
             duration = stop_distribution - start_distribution
-            handle_idle_clients(duration)
+            handle_idle_clients(duration, stop_distribution)
             aggregate_round_entries(current_round)
             task_count.clear()
 
@@ -821,13 +943,13 @@ def on_message(client, userdata, msg):
             log_directory_power = os.path.join(script_dir, "power_logs_ml")
             os.makedirs(log_directory_power, exist_ok=True)
             timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
-            file_path = os.path.join(log_directory_power, f"{timestamp}_power-log-random_{task_num}.csv")
+            file_path = os.path.join(log_directory_power, f"{timestamp}_power-log-ml_{task_num}.csv")
             print("📁 Speichere Power-Log:", file_path)
             with write_to_power_log_lock:
                 df_client_power.to_csv(file_path, index=False, encoding="utf-8")
                 
             if len(task_records) >= 5:
-                train_receiver_model(df_client_power, task_records)
+                train_receiver_model_rf(df_client_power)
             else:
                 print("⚠️ Noch zu wenig Daten zum Trainieren des ML-Modells.")
 
