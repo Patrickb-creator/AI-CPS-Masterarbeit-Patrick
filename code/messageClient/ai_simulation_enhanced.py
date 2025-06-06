@@ -365,7 +365,7 @@ if __name__ == '__main__':
     # TBD when required
 
     # Announce presence of client at server's topic-specific message channel
-    client.publish(MQTT_Topic_Execute, 'Hi there! My name is '+ client_id +' and I have subscribed to topic '+ MQTT_Topic_Execute+'.')
+    client.publish(MQTT_Topic_Execute, 'Hi there! My name is '+ client_id +' and I have subscribed to topic '+ MQTT_Topic_Execute+'. RPi=YES') #RPi=NO if not a Pi
     # Send regular status updates
     client.publish(f"status/{client_id}", "Connected", qos=1, retain=True)
 

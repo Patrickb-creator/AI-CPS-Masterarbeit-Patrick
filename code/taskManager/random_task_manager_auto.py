@@ -1,4 +1,3 @@
-
 import paho.mqtt.client as mqtt
 import os
 import re
@@ -25,98 +24,91 @@ MQTT_Password = "WhHe1NPfDBJ%"
 MQTT_Publish_Topic = "mqttTester"
 MQTT_Result_Topic = "mqttTester/results"
 MQTT_Task_Generator_Topic = "task_generator"
-connected_clients = set()  # unique set of connected PCs
+
+connected_clients = set()          # Set aller verbundenen Clients
+client_type = {}                   # client_type[cid] = "pi" oder "full"
 clients_with_tasks = 0
-client_task_done_counter = {}  # Neu: wie viele Tasks ein Client abgeschlossen hat
-client_idle_start_time = {}    # Neu: wann ein Client idle geworden ist
+client_task_done_counter = {}      # Wie viele Tasks ein Client abgeschlossen hat
+client_idle_start_time = {}        # Wann ein Client idle geworden ist
 current_round = 1
 max_round = 1
 round_task_dict = {}
 
 start_distribution = time.time()
 
-# ping_event = threading.Event()  # event to control ping threads
 stop_event = threading.Event()
 task_event = threading.Event()
 
-finisher_counter = 0  # Counter for received messages on results topic
-task_num = 0  # Counter for loaded tasks
+finisher_counter = 0  # Zähler für finish-Meldungen
+task_num = 0          # Zähler für insgesamt geladene Tasks
 
 timestamp_file = None
-log_lock = threading.Lock() # Ensure logging 
+log_lock = threading.Lock()
 write_to_power_log_lock = threading.Lock()
 
 # Global task list
 task_list = []
-task_lock = threading.Lock()  # Ensure thread-safe access to task_list
+task_lock = threading.Lock()
 
-client_status = defaultdict(int)  # 1: task distributed, 0: tasks completed
+client_status = defaultdict(int)  # 1: Task verteilt, 0: erledigt
 
-# Cache for current measured values per client
-# This is only for the analysis in experiments!!!
-power_tracking = defaultdict(list)  # Stores all measured power values per client
-task_count = defaultdict(int)   # Stores how many tasks a client has received
+# Power-Tracking
+power_tracking = defaultdict(list)
+task_count = defaultdict(int)
 
-# Cache for start and end time per Client and Batch
-# This is only for the analysis in experiments!!!
-task_timing = defaultdict(list)  
+# Timing pro Client/Task
+task_timing = defaultdict(list)
 
-# Create an empty DataFrame to store the consumption data
-# This is only for the analysis in experiments!!!
+# DataFrame für Verbrauchsdaten
 columns = [
    "round",
-   "client_id", 
-   "scenario", # Scenario is the name of the experiment, e.g. "apply", "create" or "refine"
-   "total_power_usage", 
+   "client_id",
+   "scenario",
+   "total_power_usage",
    "kwh",
    "relevant_power_values",
-   "num_of_power_values", # how many values were collected during the process
-   "tasks_assigned", 
-   "efficiency_per_task", # power in watt per task
-   "efficiency", # efficiency in tasks per kWh
-   "total_duration", 
-   "time_per_task",]
-
+   "num_of_power_values",
+   "tasks_assigned",
+   "efficiency_per_task",
+   "efficiency",
+   "total_duration",
+   "time_per_task",
+]
 df_client_power = pd.DataFrame(columns=columns)
 
-# This is needed when the client got no tasks
-client_ids = [] #"444626", "283436", "854514", "943099", "956975"
-idle_power_values = []  # Idle Power Values -> you have to collect them beforehand  11.36, 2.9, 11.315, 4.2, 72.7
-
+# Idle-Power-Werte (muss vom Nutzer gepflegt werden)
+client_ids = []
+idle_power_values = []
 df_idle_power = pd.DataFrame({
     "client_id": client_ids,
     "idle_power_value": idle_power_values
 })
 
-# Get the latest broker ip of the broker which was started via file -> Fallback Option
-def get_broker_ip_via_file():
-   broker_dir = os.path.join(parent_dir, "messageBroker")
-   ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
 
-   try:
-      with open(ip_file, 'r', encoding='utf-8') as file:
-         broker_ip = file.read().strip()
-      return broker_ip
-   except FileNotFoundError:
-      print(f"File {ip_file} not found")
+def get_broker_ip_via_file():
+    broker_dir = os.path.join(parent_dir, "messageBroker")
+    ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
+    try:
+        with open(ip_file, 'r', encoding='utf-8') as file:
+            broker_ip = file.read().strip()
+        return broker_ip
+    except FileNotFoundError:
+        print(f"File {ip_file} not found")
+
 
 def start_task_session(client_id):
     """
-    Initializes a new measurement series for a client for ONE task
+    Initialisiert für eine neue Aufgabe bei client_id.
     """
-    # Power-Messung: leere Liste erzeugen oder anhängen
     if client_id not in power_tracking:
         power_tracking[client_id] = []
-    # Task-Zähler initialisieren (optional – ggf. entfernen, falls du nur pro Runde zählst)
     if client_id not in task_count:
         task_count[client_id] = 0
     task_count[client_id] += 1
 
-    # Zeitmessung initialisieren
     if client_id not in task_timing:
         task_timing[client_id] = []
 
-    # Pro Task Startzeit und Runde merken
     task_timing[client_id].append({
         "start_time": time.time(),
         "round": current_round
@@ -124,78 +116,67 @@ def start_task_session(client_id):
 
 
 def record_power_usage(client_id, power_value):
-   """
-   Saves individual power consumption values during processing
-   """
-   power_tracking[client_id].append((time.time(), power_value))
+    """
+    Speichert eingehende Stromverbrauchswerte für client_id.
+    """
+    power_tracking[client_id].append((time.time(), power_value))
 
-def get_historical_mean_power_all_clients():
-   average_last_avg_power = df_client_power.groupby("client_id")["avg_power"].mean()
-   return average_last_avg_power.to_dict()
 
 def get_historical_mean_power_one_client(client_id):
-   historical_power_values = get_historical_mean_power_all_clients()
-   return historical_power_values.get(client_id, None) # the avg of every avg_power_value for this client
+    avg = df_client_power.groupby("client_id")["avg_power"].mean()
+    return avg.get(client_id, None)
+
 
 def end_single_task_session(client_id, scenario, end_time):
-    global df_client_power
-    global client_task_done_counter
-    global client_idle_start_time
-
+    """
+    Wird aufgerufen, wenn ein Client eine Task abgeschlossen meldet.
+    Speichert die aktiven Verbrauchswerte in df_client_power.
+    """
+    global df_client_power, client_task_done_counter, client_idle_start_time
 
     if client_id not in power_tracking:
         print(f"No Power-Tracking for {client_id} found!")
         return
-
     if client_id not in task_timing or not task_timing[client_id]:
         print(f"No timing information for {client_id}.")
         return
 
-    # Letzte Task-Zeit holen & entfernen
     timing = task_timing[client_id].pop()
     start_time = timing["start_time"]
-    round_id = timing.get("round", current_round)  # Nutze aktuelle Runde wenn nicht anders gespeichert
+    round_id = timing.get("round", current_round)
 
     relevant_power_values = [
         power for timestamp, power in power_tracking[client_id]
         if start_time <= timestamp <= end_time
     ]
-
     if relevant_power_values:
         avg_power = float(np.mean(relevant_power_values))
     else:
-        idle_power_value_list = df_idle_power.loc[df_idle_power['client_id'] == client_id, 'idle_power_value'].values
-        avg_power = float(idle_power_value_list[0]) if len(idle_power_value_list) > 0 else 0.0
+        idle_list = df_idle_power.loc[df_idle_power["client_id"] == client_id, "idle_power_value"].values
+        avg_power = float(idle_list[0]) if len(idle_list) > 0 else 0.0
 
     total_duration = end_time - start_time
-    
-      # Summe aller vorherigen time_per_task-Einträge für diesen Client & Runde
-    previous_tasks = df_client_power[
+    prev = df_client_power[
         (df_client_power["client_id"] == client_id) &
         (df_client_power["round"] == round_id)
     ]
-
-    previous_time_sum = previous_tasks["time_per_task"].sum() if not previous_tasks.empty else 0
-    time_per_task = (end_time - start_time) - previous_time_sum
+    prev_time_sum = prev["time_per_task"].sum() if not prev.empty else 0
+    time_per_task = total_duration - prev_time_sum
     if time_per_task <= 0:
-        time_per_task = total_duration  # Fallback falls was schiefgeht
-        
+        time_per_task = total_duration
+
     total_power_usage = avg_power * total_duration
     kwh = total_power_usage / 3600000
-    
-    # 🔁 Client-Task-Zähler erhöhen
+
     client_task_done_counter[client_id] = client_task_done_counter.get(client_id, 0) + 1
 
-    # 🟡 Wenn dieser Client alle ihm zugewiesenen Tasks erledigt hat
     if (
         task_count.get(client_id, 0) > 0 and
         client_task_done_counter[client_id] == task_count[client_id] and
         finisher_counter < clients_with_tasks
     ):
-        # ⏱️ Zeitpunkt speichern, ab wann dieser Client im Idle-Modus ist
         client_idle_start_time[client_id] = end_time
         print(f"🟡 Client {client_id} ist jetzt idle (alle Tasks erledigt)")
-
 
     new_data = pd.DataFrame([{
         "round": round_id,
@@ -212,103 +193,75 @@ def end_single_task_session(client_id, scenario, end_time):
         "total_duration": total_duration,
         "time_per_task": time_per_task,
     }])
-
     df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
     print(f"📊 Einzelne Aufgabe gespeichert für {client_id}: {scenario}, Runde {round_id}")
-    
     print(f"✅ Save Data for {client_id}: {new_data.to_dict(orient='records')}")
 
 
-
 def end_task_session(client_id, end_time):
+    """
+    Alternative Methode, wenn der Client per finish/... seine gesamte Session
+    als beendet meldet. (Optional, wird hier aktuell nicht aufgerufen.)
+    """
+    global df_client_power, df_idle_power
 
-   global df_client_power
-   global df_idle_power
+    if client_id not in power_tracking:
+        print(f"No Power-Tracking for {client_id} found!")
+        return
 
-   avg_power = 0
+    start_time = task_timing[client_id][-1]["start_time"]
+    relevant_power_values = [
+        power for timestamp, power in power_tracking[client_id]
+        if start_time <= timestamp <= end_time
+    ]
 
-   if client_id not in power_tracking:
-      print(f"No Power-Tracking for {client_id} found!")
-      return
+    if relevant_power_values:
+        avg_power = float(np.mean(relevant_power_values))
+    else:
+        hist = get_historical_mean_power_one_client(client_id)
+        if hist:
+            avg_power = hist
+        else:
+            idle_list = df_idle_power.loc[df_idle_power["client_id"] == client_id, "idle_power_value"].values
+            avg_power = float(idle_list[0]) if len(idle_list) > 0 else 0.0
 
-   start_time = task_timing[client_id][-1]["start_time"]  # get start time
+    total_duration = end_time - start_time
+    total_power_usage = avg_power * total_duration
+    kwh = total_power_usage / 3600000
 
-   # Only add up values within the time window
-   relevant_power_values = [
-      power for timestamp, power in power_tracking[client_id] 
-      if start_time <= timestamp <= end_time
-   ]
+    total_tasks = task_count.get(client_id, 0)
+    inv_efficiency = total_tasks / kwh if kwh > 0 else 0
+    efficiency_per_task = kwh / total_tasks if total_tasks > 0 else 0
+    time_per_task = total_duration / total_tasks if total_tasks > 0 else 0
 
-   if len(relevant_power_values) == 0:
-      # No values from shelly here
-      avg_power = get_historical_mean_power_one_client(client_id)
-      if not avg_power:
-         idle_power_value_list = df_idle_power.loc[df_idle_power['client_id'] == client_id, 'idle_power_value'].values
-        
-         # Check if there's a valid idle_power_value
-         if len(idle_power_value_list) > 0 and idle_power_value_list[0] is not None:
-            avg_power = float(idle_power_value_list[0])
-         else:
-            print(f"No valid idle power value for client {client_id}. Using default value.")
-            avg_power = 0.0  # Set to a default value if None
-         # we take this when no power is provided so we at least get something..
-   else:
-      avg_power = np.mean(relevant_power_values)  # Average performance of the client, mean is taken because sometimes one and sometimes 30 data points are received
-      
-      if avg_power is not None:
-         avg_power = float(avg_power)
-   
-   # Is in seconds because time is in epoch, this Unix timestamp
-   total_duration = end_time - start_time
+    new_data = pd.DataFrame([{
+        "client_id": client_id,
+        "total_power_usage": total_power_usage,
+        "avg_power": avg_power,
+        "kwh": kwh,
+        "relevant_power_values": relevant_power_values,
+        "num_of_power_values": len(relevant_power_values),
+        "tasks_assigned": total_tasks,
+        "efficiency_per_task": efficiency_per_task,
+        "efficiency": inv_efficiency,
+        "total_duration": total_duration,
+        "time_per_task": time_per_task
+    }])
+    df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
+    print(f"✅ Save Data for {client_id}: {new_data.to_dict(orient='records')}")
+    del power_tracking[client_id]
 
-   # Power (watts) × time (seconds)-> watt seconds (Ws)
-   # 1 kWh = 1,000 watts × 1 hour = 3,600,000 watt seconds (Ws)
-   # Therefore, we divide by 3,600,000 to get from Ws -> kWh.
-   total_power_usage = avg_power * total_duration  # Total energy consumption in Ws
-   kwh = (avg_power * total_duration) / 3600000  # Conversion to kWh   
-
-   total_tasks = task_count.get(client_id, 0)
-   
-   # Tasks per kWh
-   inv_efficiency = total_tasks / kwh if kwh > 0 else 0 # # Tasks per kWh (inv_efficiency) is better, if you want to know who gets the most out of the energy.
-
-   # kwh per task
-   efficiency_per_task = kwh / total_tasks if total_tasks > 0 else 0  # kWh per task (efficiency_per_task) is good if I want to know who needs the least amount of energy per task
-   time_per_task = total_duration / total_tasks if total_tasks > 0 else 0 
-   
-   # Add new data to dataframe
-   new_data = pd.DataFrame([{
-      "client_id": client_id,
-      "total_power_usage": total_power_usage,
-      "avg_power": avg_power, # avg_power in this run
-      "kwh": kwh, # in this run
-      "relevant_power_values": relevant_power_values,
-      "num_of_power_values": len(relevant_power_values), 
-      "tasks_assigned": total_tasks,
-      "efficiency_per_task": efficiency_per_task, # kwh per task
-      "efficiency": inv_efficiency, # tasks per kWh
-      "total_duration": total_duration,
-      "time_per_task": time_per_task
-   }])
-
-   df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
-
-   print(f"✅ Save Data for {client_id}: {new_data.to_dict(orient='records')}")
-
-   # Empty memory for the next measurement
-   del power_tracking[client_id]
 
 def aggregate_round_entries(round_number):
+    """
+    Am Ende einer Runde alle Einträge dieser Runde aggregieren.
+    """
     global df_client_power
-
-    # Filter für aktuelle Runde
     round_entries = df_client_power[df_client_power["round"] == round_number]
-
     if round_entries.empty:
         print(f"⚠️ Keine Einträge für Runde {round_number} gefunden.")
         return
 
-    # Aggregation
     total_power = round_entries["total_power_usage"].sum()
     avg_power = total_power / len(round_entries)
     total_tasks = round_entries["tasks_assigned"].sum()
@@ -320,10 +273,9 @@ def aggregate_round_entries(round_number):
     avg_time_per_task = round_entries["time_per_task"].mean()
     avg_duration = round_entries["total_duration"].max()
 
-    # Neue Zeile mit Aggregatsdaten
     aggregated_row = pd.DataFrame([{
         "client_id": 0,
-        "scenario": "",  # leer lassen
+        "scenario": "",
         "round": round_number,
         "total_power_usage": total_power,
         "avg_power": avg_power,
@@ -336,22 +288,17 @@ def aggregate_round_entries(round_number):
         "total_duration": avg_duration,
         "time_per_task": avg_time_per_task
     }])
-
-    # Anhängen
     df_client_power = pd.concat([df_client_power, aggregated_row], ignore_index=True)
     print(f"📊 Aggregierte Daten für Runde {round_number} hinzugefügt.")
 
 
 def load_tasks_from_file():
-  
-    global round_task_dict
-    global task_count
-    global timestamp_file
-    global finisher_counter
-    global clients_with_tasks
-    global task_num
-    global max_round
-    global current_round
+    """
+    Lädt alle Aufgaben aus generated_tasks.txt, gruppiert sie nach Runde,
+    und weist jedem Task beim Speichern in round_task_dict bereits einen
+    zufälligen "receiver" zu – mit Pi/Full-Logik.
+    """
+    global round_task_dict, task_count, finisher_counter, clients_with_tasks, task_num, current_round
 
     finisher_counter = 0
     clients_with_tasks = 0
@@ -362,56 +309,83 @@ def load_tasks_from_file():
     generator_dir = os.path.join(parent_dir, "taskGenerator")
     manager_dir = os.path.join(parent_dir, "taskManager")
 
-    # Log dir for logs of the TM in regards of processing and distributing the tasks
     log_directory = os.path.join(manager_dir, 'logs')
     if not os.path.exists(log_directory):
         os.makedirs(log_directory)
 
-    # Change this if you use different generators!!
     task_file = os.path.join(generator_dir, "generated_tasks.txt")
-
     try:
         with open(task_file, 'r', encoding='utf-8') as file:
             loaded_tasks = [line.strip() for line in file.readlines() if line.strip()]
-
             for task in loaded_tasks:
                 match = re.search(r'round=(\d+)', task)
-                if match:
-                    round_number = int(match.group(1))
-                    task_entry = f"{task} sender={client_id}, receiver={random.choice(list(connected_clients))}\""
-                    round_task_dict.setdefault(round_number, []).append(task_entry)
-                    task_num += 1
-                else:
+                if not match:
                     print(f"⚠️ Keine Runde in Task gefunden: {task}")
+                    continue
+
+                round_number = int(match.group(1))
+                # Features extrahieren (um Szenario herauszufinden)
+                scen_match = re.search(r'scenario=([^\s,]+)', task)
+                scen = scen_match.group(1).split('_')[0] if scen_match else "unknown"
+
+                # Prüfen, ob nur Pis verbunden sind:
+                only_pis = True
+                for c in connected_clients:
+                    if client_type.get(c, "full") != "pi":
+                        only_pis = False
+                        break
+
+                # Wenn nur Pis und diese Task nicht "apply" ist → überspringen
+                if only_pis and scen != "apply":
+                    print(f"⚠️ Runde {round_number}: Nur Pis online, entferne Task '{scen}'.")
+                    continue
+
+                # Gültige Kandidatenliste zusammenstellen
+                valid = []
+                for c in connected_clients:
+                    if client_type.get(c, "full") == "pi" and scen != "apply":
+                        continue
+                    valid.append(c)
+
+                if not valid:
+                    # Wenn valid leer – kein Full-Client und Task ist nicht "apply" oder keine Clients → überspringen
+                    print(f"⚠️ Keine geeigneten Clients für Task '{scen}', Runde {round_number}.")
+                    continue
+
+                # Zufälligen Empfänger aus valid wählen
+                receiver = random.choice(valid)
+                task_entry = f"{task} sender={client_id}, receiver={receiver}\""
+                round_task_dict.setdefault(round_number, []).append(task_entry)
+                task_num += 1
 
         print("Aufgaben erfolgreich geladen und nach Runden gruppiert.")
-
     except Exception as e:
         print(f"Fehler beim Laden von {task_file}: {e}")
 
+
 def find_receiver(task):
-    # Regular expression to extract the receiver value
+    """
+    Extrahiert aus dem Task-String den bereits eingetragenen receiver.
+    """
     match = re.search(r'receiver=([^\s,]+)', task)
-    # If a hit is found, output the receiver
     if match:
-        receiver = match.group(1).rstrip('"')
-        return receiver
+        return match.group(1).rstrip('"')
     else:
         print("No receiver found")
+        return None
 
-# distrbute available tasks randomly to the connected clients
-# the ❤️ of the distribution!!!!!
+
 def distribute_tasks(client):
-    global task_list
-    global clients_with_tasks
-    global task_count
-    global start_distribution
-    global current_round
-    global round_task_dict
+    """
+    Liest round_task_dict[current_round] und sendet sie an die Clients.
+    Da load_tasks_from_file die Empfänger bereits zufällig (unter Berücksichtigung
+    von Pi/Full) bestimmt hat, muss hier nur noch das Publish erfolgen.
+    """
+    global task_list, clients_with_tasks, task_count, start_distribution, current_round, round_task_dict
 
     while not stop_event.is_set():
         print("⏳ Warte auf neue Runde...")
-        task_event.wait()  # Blockiert, bis Event gesetzt wird
+        task_event.wait()
         print(f"✅ Neue Runde erkannt (Runde {current_round}), beginne Verteilung...")
 
         if not connected_clients:
@@ -420,9 +394,7 @@ def distribute_tasks(client):
             continue
 
         with task_lock:
-            # ⬇️ Lade die Aufgaben aus der aktuellen Runde
             task_list = round_task_dict.get(current_round, []).copy()
-
             if not task_list:
                 print("⚠️ task_list ist leer, Event wird zurückgesetzt.")
                 task_event.clear()
@@ -430,203 +402,168 @@ def distribute_tasks(client):
 
         local_clients_with_tasks = 0
 
+        # Wir nehmen jeden Task, ermitteln den receiver und schicken das Paket
         while True:
             with task_lock:
                 if not task_list:
                     break
                 task = task_list.pop(0)
 
-            target_client = find_receiver(task)
+            receiver = find_receiver(task)
+            if receiver is None:
+                continue
 
-            # Kombiniere alle Aufgaben für diesen Client
+            # Alle Tasks für denselben receiver auf einmal bündeln
             combined_tasks = [task]
             i = 0
             while i < len(task_list):
-                with task_lock:
-                    next_task = task_list[i]
-                    if find_receiver(next_task) == target_client:
-                        combined_tasks.append(task_list.pop(i))
-                    else:
-                        i += 1
+                next_task = task_list[i]
+                if find_receiver(next_task) == receiver:
+                    combined_tasks.append(task_list.pop(i))
+                else:
+                    i += 1
 
-            task_string = "\n".join([
-                re.sub(r"round=\d+,\s*", "", t)
-                for t in combined_tasks
+            task_payload = "\n".join([
+                re.sub(r"round=\d+,\s*", "", t) for t in combined_tasks
             ])
 
-            if target_client in connected_clients:
+            if receiver in connected_clients:
                 client.publish("start_stop/taskWorker", 1, qos=1)
-                client.publish(f"tasks/{target_client}", task_string, qos=1)
+                client.publish(f"tasks/{receiver}", task_payload, qos=1)
 
-                # 🛠️ WICHTIG: Für jede einzelne Aufgabe Startzeit registrieren
                 for _ in combined_tasks:
-                    start_task_session(target_client)
+                    start_task_session(receiver)
 
-                task_count[target_client] = len(combined_tasks)
+                task_count[receiver] = len(combined_tasks)
                 local_clients_with_tasks += 1
                 start_distribution = time.time()
-                print(f"📦 Verteilte {len(combined_tasks)} Aufgaben an {target_client}")
+                print(f"📦 Verteilte {len(combined_tasks)} Aufgaben an {receiver}")
             else:
-                print(f"⚠️ Ziel-Client {target_client} nicht verbunden. Überspringe.")
+                print(f"⚠️ Ziel-Client {receiver} nicht verbunden. Überspringe.")
 
             time.sleep(2)
 
-        # ✅ Jetzt erst: Leere die Aufgaben der aktuellen Runde!
         with task_lock:
             round_task_dict[current_round] = []
 
+        # Clients-with-tasks als Anzahl der Clients, die Aufgaben bekamen
+        # (sofern man überprüfen möchte, wie viele Clients wirklich rechnen)
         clients_with_tasks = local_clients_with_tasks
+        print(f"ℹ️ clients_with_tasks gesetzt auf {clients_with_tasks} nach Verteilung")
         task_event.clear()
 
 
-
-# Monitor active clients
 def monitor_clients():
-   # global ping_event, if you want to use it, comment in the ping stuff
-   while not stop_event.is_set():
-      print(f"Active clients: {connected_clients}")
-      # if connected_clients and not ping_event.is_set():
-      #    print("Clients connected. Resuming ping...")
-      #    ping_event.set()  # activate ping
-      # elif not connected_clients and ping_event.is_set():
-      #    print("No clients connected. Pausing ping...")
-      #    ping_event.clear()  # pause ping
-      time.sleep(10)
+    """
+    Gibt alle 10 Sekunden aus, welche Clients aktuell verbunden sind.
+    """
+    while not stop_event.is_set():
+        print(f"Active clients: {connected_clients}")
+        time.sleep(10)
 
-# Callback function for mqtt connection
+
 def on_connect(client, userdata, flags, rc):
-   print("Connected with result code " + str(rc))
+    """
+    Sobald der Manager beim Broker connected ist, abonniere alle relevanten Topics.
+    """
+    print("Connected with result code " + str(rc))
+    connected_clients.clear()
+    client.subscribe(MQTT_Publish_Topic, qos=0)
+    client.subscribe(MQTT_Result_Topic, qos=0)
+    client.subscribe("status/#")
+    client.subscribe("task_generator", qos=1)
+    client.subscribe("ShellyVerbrauch/#")
+    client.subscribe("finish/#")
 
-   connected_clients.clear()  # Empty set when we are setting a new connection
-
-   client.subscribe(MQTT_Publish_Topic, qos=0) # Channel to deal with tasks
-   client.subscribe(MQTT_Result_Topic, qos=0)
-   client.subscribe("status/#") # Subscribe to the status of all clients to monitor who is connected
-   # client.subscribe("ping/response/#") # Listen for ping responses
-   client.subscribe("task_generator", qos=1) # Listen to the task_generator
-   client.subscribe("ShellyVerbrauch/#")  # Subscribe to all Shelly power topics
-   client.subscribe("finish/#")
 
 def get_shelly_apower_data_status_switch(topic, message):
- 
-   # Parse the client ID from the topic
-   client_id_json = topic.split("/")[1]
-
-   if client_id_json in connected_clients:
-      try:
-         power_reading = json.loads(message)
-         # Check whether the message actually contains performance data
-         if message == "true" or message == "false":
-            print(f"Message received without performance data: {message}")
-         elif "apower" in power_reading:
-            actual_power = power_reading["apower"]
-   
-            if actual_power is not None:
-               record_power_usage(client_id_json, actual_power)
-               print(f"🔹 {client_id_json}: {actual_power} W")
+    """
+    Verarbeitung eingehender Shelly-Stromevents (Status mit 'apower').
+    """
+    client_id_json = topic.split("/")[1]
+    if client_id_json in connected_clients:
+        try:
+            power_reading = json.loads(message)
+            if "apower" in power_reading:
+                actual_power = power_reading["apower"]
+                if actual_power is not None:
+                    record_power_usage(client_id_json, actual_power)
+                    print(f"🔹 {client_id_json}: {actual_power} W")
+                else:
+                    print(f"No 'apower' data for {client_id_json}!")
             else:
-               print(f"No 'apower' data for {client_id_json}!")
-         else:
-               print(f"Messagge without 'params': {message}")     
-      except json.JSONDecodeError:
-            print(f"Error parsing the JSON message: {message}")
-      except Exception as e:
+                print(f"Messung ohne 'apower': {message}")
+        except json.JSONDecodeError:
+            print(f"Error parsing JSON: {message}")
+        except Exception as e:
             print(f"Unexpected error when processing {topic}: {e}")
+
 
 def get_shelly_apower_data_events(topic, message):
-   
-   # Parse the client ID from the topic
-   client_id_json = topic.split("/")[1]
-
-   if client_id_json in connected_clients:
-      try:
-         power_reading = json.loads(message)
-         # Check whether the message actually contains performance data
-         if message == "true" or message == "false":
-            print(f"Message received without performance data: {message}")
-         elif "params" in power_reading:
-               params = power_reading["params"]
-               
-               if "switch:0" in params:
-                  actual_power = params["switch:0"].get("apower")
-      
-                  if actual_power is not None:
-                     record_power_usage(client_id_json, actual_power)
-                     print(f"🔹 {client_id_json}: {actual_power} W")
-                  else:
-                     print(f"No 'apower' data for {client_id_json}!")
-               else:
-                  print(f"'params' available, but no 'switch:0': {message}")
-         else:
-            print(f"Messagge without 'params': {message}")     
-      except json.JSONDecodeError:
-            print(f"Error parsing the JSON message: {message}")
-      except Exception as e:
+    """
+    Verarbeitung eingehender Shelly-Stromevents (Events mit 'switch:0').
+    """
+    client_id_json = topic.split("/")[1]
+    if client_id_json in connected_clients:
+        try:
+            power_reading = json.loads(message)
+            if "params" in power_reading and "switch:0" in power_reading["params"]:
+                actual_power = power_reading["params"]["switch:0"].get("apower")
+                if actual_power is not None:
+                    record_power_usage(client_id_json, actual_power)
+                    print(f"🔹 {client_id_json}: {actual_power} W")
+                else:
+                    print(f"No 'apower' data for {client_id_json}!")
+            else:
+                print(f"Messung ohne relevante 'params': {message}")
+        except json.JSONDecodeError:
+            print(f"Error parsing JSON: {message}")
+        except Exception as e:
             print(f"Unexpected error when processing {topic}: {e}")
 
+
 def handle_idle_clients(duration, stop_time):
-    global df_client_power
-    global power_tracking
-    global client_idle_start_time
-    global task_count
-    global connected_clients
+    """
+    Erfasst Idle-Zeiten bei allen Clients (inkl. Pis), erzeugt IDLE-Einträge im df und
+    leert anschließend client_idle_start_time sowie client_task_done_counter.
+    """
+    global df_client_power, power_tracking, connected_clients
 
     print(f"handle_idle_clients gestartet mit duration={duration:.2f}")
-    print(f"connected_clients: {list(connected_clients)}")
-    print(f"task_count keys: {list(task_count.keys())}")
-    print(f"client_idle_start_time keys: {list(client_idle_start_time.keys())}")
-    print(f"Vor Einfügen: df_client_power Größe = {df_client_power.shape}")
-
-    # 1) Alle relevanten Clients zusammenstellen:
-    #    – jene, die Tasks hatten (task_count.keys())
-    #    – jene, die schon idle geworden sind (client_idle_start_time.keys())
-    #    – alle verbundenen Clients (connected_clients)
     client_ids_all = list(
-        set(task_count.keys())
-        | set(client_idle_start_time.keys())
-        | set(connected_clients)
+        set(task_count.keys()) |
+        set(client_idle_start_time.keys()) |
+        set(connected_clients)
     )
     print(f"Clients insgesamt: {client_ids_all}")
 
-    # 2) Für jeden Client in client_ids_all prüfen, ob er unassigned oder early finisher ist
     for cid in client_ids_all:
         is_unassigned = cid not in task_count or task_count[cid] == 0
         is_early_finisher = cid in client_idle_start_time
-
         if not is_unassigned and not is_early_finisher:
-            print(f" → Überspringe Client '{cid}' (nicht unassigned oder early finisher)")
             continue
 
         if is_unassigned:
-            # Client hatte in dieser Runde gar keine Tasks → idle von Runde Beginn
-            idle_start = stop_time - duration  # ganze Rundendauer
+            idle_start = stop_time - duration
             idle_duration = duration
-            print(f" → Client '{cid}' (nie beauftragt), idle_duration = gesamte Runde: {idle_duration:.2f}s")
         else:
-            # Client war früher fertig
             idle_start = client_idle_start_time[cid]
-            idle_duration = (stop_time - idle_start)
-            print(f" → Client '{cid}' früh fertig, idle_duration = {idle_duration:.2f}s")
+            idle_duration = stop_time - idle_start
 
-        # 3) Echte Leistungswerte in Idle‐Fenster sammeln
         relevant_power_values = [
             power for ts, power in power_tracking.get(cid, [])
             if idle_start <= ts <= stop_time
         ]
-
         if relevant_power_values:
             avg_power = float(np.mean(relevant_power_values))
             num_values = len(relevant_power_values)
         else:
-            # Wenn wirklich gar keine Messdaten existieren, avg_power = 0
             avg_power = 0.0
             num_values = 0
-            print(f"⚠️ Keine Leistungswerte für Idle‐Zeit von Client '{cid}' gefunden!")
 
         total_power_usage = avg_power * idle_duration
         kwh = total_power_usage / 3600000
 
-        # 4) Neue IDLE‐Zeile erzeugen
         new_data = pd.DataFrame([{
             "round": current_round,
             "client_id": cid,
@@ -641,86 +578,74 @@ def handle_idle_clients(duration, stop_time):
             "total_duration": idle_duration,
             "time_per_task": 0
         }])
-
         df_client_power = pd.concat([df_client_power, new_data], ignore_index=True)
         print(f"➕ Idle‐Zeit erfasst für '{cid}': {idle_duration:.2f}s, Verbrauch: {kwh:.6f} kWh, Werte: {num_values}")
         print(f" → df_client_power Größe jetzt: {df_client_power.shape}")
 
-    print("✅ handle_idle_clients beendet")
-
-    # 5) Am Ende der Runde räumen wir die dynamischen Idle‐ und Task‐Zähler wieder leer:
     client_idle_start_time.clear()
     client_task_done_counter.clear()
-    
-    
+    print("✅ handle_idle_clients beendet")
+
+
 def on_message(client, userdata, msg):
-    global task_list
-    global task_count
-    global finisher_counter
-    global task_num
-    global clients_with_tasks
-    global stop_distribution
-    global current_round
-    global round_task_dict
+    """
+    Verarbeitet alle eingehenden MQTT-Nachrichten:
+      - status/#     → Connected/Disconnected
+      - mqttTester/results → Task‐Ergebnis
+      - finish/#     → wenn alle einer Runde fertig sind, IDLE erfassen, aggregieren, CSV‐Export
+      - task_generator → neue Runde laden
+      - ShellyVerbrauch/# → Strommessungen
+      - 'My name is … RPi=YES/NO' → Client meldet sich + Typ
+    """
+    global task_list, task_count, finisher_counter, task_num, clients_with_tasks
+    global stop_distribution, current_round, round_task_dict, start_distribution
 
     message = msg.payload.decode()
     topic = msg.topic
 
-    # Debug-Ausgabe
     if not topic.startswith("ShellyVerbrauch"):
         print(f"Message received on {msg.topic}: {message}")
 
-    # 🟨 Status-Nachrichten (Connected/Disconnected)
+    # ── Status/Disconnect ──
     if topic.startswith("status/"):
         client_name = topic.split("/")[1]
-
-        # Ignoriere retained Nachrichten (z. B. alte Verbindungen)
         if msg.retain:
-            print(f"⚠️ Ignoriere retained Nachricht für {client_name}")
             return
-
         if "Disconnected" in message:
             connected_clients.discard(client_name)
         elif "Connected" in message:
             connected_clients.add(client_name)
-          # 🟦 Einzelne Task-Ergebnisse (laufen NICHT über finish/, sondern mqttTester/results)
-          
+
+    # ── Task-Ergebnis ──
     elif topic == "mqttTester/results":
         if "Task executed" in message and "scenario=" in message:
             print("📥 Eingehende Task-Ausführungs-Meldung:", message)
-
             match = re.match(r"(\w+): scenario=(\w+)_\w+", message)
             if match:
-                client_id = match.group(1)
-                scenario = match.group(2)
+                cid = match.group(1)
+                scen = match.group(2)
                 end_time = time.time()
-                end_single_task_session(client_id, scenario, end_time)
+                end_single_task_session(cid, scen, end_time)
 
-
-    # 🟩 Task-Finish-Meldungen
+    # ── finish/# ──
     elif topic.startswith("finish/"):
         finisher_counter += 1
         if message.startswith("Finished"):
             finished_client = message.split(" ")[1]
             client_status[finished_client] = 0
-            end_time = time.time()
-            #end_task_session(finished_client, end_time)
-            
-            
+
         if clients_with_tasks == finisher_counter:
             stop_distribution = time.time()
-            print(f"✅ Runde {current_round} abgeschlossen: {finisher_counter}/{task_num} Tasks erledigt")
-
+            print(f"✅ Runde {current_round} abgeschlossen: {finisher_counter}/{clients_with_tasks} Tasks erledigt")
             client.publish("start_stop/taskWorker", 0, qos=1)
             client.publish("tasks_done", "done", qos=1)
 
-            # Analyse und Logging
             duration = stop_distribution - start_distribution
             handle_idle_clients(duration, stop_distribution)
             aggregate_round_entries(current_round)
             task_count.clear()
 
-            # CSV-Export
+            # CSV Export
             script_dir = os.path.dirname(os.path.realpath(__file__))
             log_directory_power = os.path.join(script_dir, "power_logs_random")
             os.makedirs(log_directory_power, exist_ok=True)
@@ -730,93 +655,85 @@ def on_message(client, userdata, msg):
             with write_to_power_log_lock:
                 df_client_power.to_csv(file_path, index=False, encoding="utf-8")
 
-            # ⬇️ Starte nächste Runde
+            # Nächste Runde starten
             current_round += 1
             finisher_counter = 0
             clients_with_tasks = 0
-
             if current_round in round_task_dict and round_task_dict[current_round]:
                 print(f"🚀 Starte Runde {current_round}")
                 task_event.set()
             else:
                 print("🎉 Alle Runden abgeschlossen.")
 
-    # 🟦 Task-Generator aktiviert
+    # ── task_generator ──
     elif topic == "task_generator":
         print("⚙️ Task generator triggered. Lade Aufgaben...")
         load_tasks_from_file()
-
         if current_round in round_task_dict and round_task_dict[current_round]:
             print(f"🚀 Starte initiale Runde {current_round}")
             with task_lock:
                 task_list = round_task_dict[current_round]
+            # Setze clients_with_tasks auf die gefilterte Anzahl an Tasks
             clients_with_tasks = len(task_list)
+            print(f"ℹ️ clients_with_tasks = {clients_with_tasks} (nach Filterung)")
             task_event.set()
         else:
             print("⚠️ Keine Aufgaben für Runde 1 gefunden.")
 
-    # 🟫 Shelly Power-Daten (Analyse)
+    # ── Shelly Verbrauchsdaten ──
     elif topic.startswith("ShellyVerbrauch/") and "status" in topic and "switch:0" in topic:
         get_shelly_apower_data_status_switch(topic, message)
     elif topic.startswith("ShellyVerbrauch/") and "events" in topic:
         get_shelly_apower_data_events(topic, message)
 
-    # 🔵 Client meldet sich per „My name is ...“
+    # ── Client meldet sich: “My name is … RPi=YES/NO” ──
     match = re.search(r"My name is (\w+)", message)
     if match:
-        connected_pc = match.group(1)
-        connected_clients.add(connected_pc)
+        cid = match.group(1)
+        connected_clients.add(cid)
+        rpi_match = re.search(r"RPi=(YES|NO)", message)
+        if rpi_match:
+            client_type[cid] = "pi" if rpi_match.group(1) == "YES" else "full"
+        else:
+            client_type[cid] = "full"
+        print(f"ℹ️ Client '{cid}' registriert als Typ '{client_type[cid]}'")
+        return
 
 
 if __name__ == '__main__':
-   client = mqtt.Client()
-   client.on_connect = on_connect
-   client.on_message = on_message
-   client.username_pw_set(username=MQTT_Username, password=MQTT_Password)
-   print(f"📋 Verbundene Clients bei Start: {connected_clients}")
+    client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.username_pw_set(username=MQTT_Username, password=MQTT_Password)
+    print(f"📋 Verbundene Clients bei Start: {connected_clients}")
 
+    client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=True)
 
-   # Set Last Will Message so the manager knows where not to give tasks anymore
-   client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=True)
+    MQTT_Broker = get_broker_ip_via_file()
+    Broker_Port = 1883
 
-   MQTT_Broker = get_broker_ip_via_file()
-   Broker_Port = 1883
+    try:
+        client.connect(MQTT_Broker, Broker_Port)
+        client.enable_logger()
 
-   try:
-      # Connect to MQTT broker
-      client.connect(MQTT_Broker, Broker_Port)
-      client.enable_logger()
+        monitor_thread = threading.Thread(target=monitor_clients)
+        task_thread = threading.Thread(target=distribute_tasks, args=(client,))
+        monitor_thread.start()
+        task_thread.start()
 
-      # Start monitoring and tasks threads
-      monitor_thread = threading.Thread(target=monitor_clients)
-      task_thread = threading.Thread(target=distribute_tasks, args=(client,))
-      monitor_thread.start()
-      task_thread.start()
+        client.loop_forever()
 
-      client.loop_forever()
-
-      # Publish initial messages
-      client.publish(MQTT_Publish_Topic, f"This is the Manager. My name is {client_id} and I have subscribed to topic {MQTT_Publish_Topic}.")
-      client.publish(MQTT_Result_Topic, f"This is the Manager. My name is {client_id} and I have subscribed to topic {MQTT_Result_Topic}.")
-
-   except KeyboardInterrupt:
-      print("Keyboard interrupt detected. Exiting gracefully...")
-   except Exception as e:
-      print("Caught Exception " + e)
-   finally:
-      stop_event.set()
-      task_event.set()
-      print("Set stop_event to False.")
-      client.loop_stop()
-      print("Stopped client loop.")
-      client.disconnect()
-      print("Client disconnected.")
-
-      # Join threads if they are alive
-      if 'monitor_thread' in locals() and monitor_thread.is_alive():
-         monitor_thread.join(timeout=5)
-      if 'task_thread' in locals() and task_thread.is_alive():
-         task_thread.join(timeout=5)
-
-      print("Threads joined. Exiting now.")
-      sys.exit(0)
+    except KeyboardInterrupt:
+        print("Keyboard interrupt detected. Exiting gracefully...")
+    except Exception as e:
+        print("Caught Exception " + str(e))
+    finally:
+        stop_event.set()
+        task_event.set()
+        client.loop_stop()
+        client.disconnect()
+        if 'monitor_thread' in locals() and monitor_thread.is_alive():
+            monitor_thread.join(timeout=5)
+        if 'task_thread' in locals() and task_thread.is_alive():
+            task_thread.join(timeout=5)
+        sys.exit(0)

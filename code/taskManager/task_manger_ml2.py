@@ -31,16 +31,17 @@ MQTT_Password = "WhHe1NPfDBJ%"
 MQTT_Publish_Topic = "mqttTester"
 MQTT_Result_Topic = "mqttTester/results"
 MQTT_Task_Generator_Topic = "task_generator"
-connected_clients = set()  # unique set of connected PCs
+connected_clients = set()        # Set aller verbundenen Client-IDs
+client_type = {}                 # client_type[cid] = "pi" oder "full"
 clients_with_tasks = 0
 current_round = 1
 max_round = 1
 round_task_dict = {}
 task_records = []
-client_task_done_counter = {}  # wie viele Tasks ein Client abgeschlossen hat
-client_idle_start_time = {}    # wann ein Client idle geworden ist
+client_task_done_counter = {}    # wie viele Tasks ein Client erledigt hat
+client_idle_start_time = {}      # wann ein Client in den Idle-Status ging
 
-# ML-Regressormodelle (werden am Laufzeitende jeder Runde neu trainiert)
+# ML-Regressormodelle (werden nach jeder 5. Runde neu trainiert)
 model_duration = None
 model_kwh = None
 
@@ -49,7 +50,7 @@ stop_event = threading.Event()
 task_event = threading.Event()
 
 finisher_counter = 0  # Counter für finish-Meldungen
-task_num = 0  # Counter für insgesamt geladene Tasks
+task_num = 0          # Counter für insgesamt geladene Tasks
 
 timestamp_file = None
 log_lock = threading.Lock()
@@ -59,7 +60,7 @@ write_to_power_log_lock = threading.Lock()
 task_list = []
 task_lock = threading.Lock()
 
-client_status = defaultdict(int)  # 1: task verteilt, 0: fertig
+client_status = defaultdict(int)  # 1: Task verteilt, 0: fertig
 
 # Power-Tracking
 power_tracking = defaultdict(list)  # (timestamp, power) pro Client
@@ -98,6 +99,7 @@ df_idle_power = pd.DataFrame({
     "idle_power_value": idle_power_values
 })
 
+
 def get_broker_ip_via_file():
     broker_dir = os.path.join(parent_dir, "messageBroker")
     ip_file = os.path.join(broker_dir, "broker_ip_log.txt")
@@ -108,7 +110,9 @@ def get_broker_ip_via_file():
     except FileNotFoundError:
         print(f"File {ip_file} not found")
 
+
 def start_task_session(client_id):
+    """Markiere Beginn einer Task auf dem gegebenen client_id."""
     if client_id not in power_tracking:
         power_tracking[client_id] = []
     if client_id not in task_count:
@@ -121,18 +125,28 @@ def start_task_session(client_id):
         "round": current_round
     })
 
+
 def record_power_usage(client_id, power_value):
+    """Speichere jede ankommende Strommessung für client_id."""
     power_tracking[client_id].append((time.time(), power_value))
+
 
 def get_historical_mean_power_one_client(client_id):
     avg = df_client_power.groupby("client_id")["avg_power"].mean()
     return avg.get(client_id, None)
 
+
 def end_single_task_session(
     client_id, scenario, end_time,
     knowledge_base="-", activation_base="-", code_base="-", learning_base="-"
 ):
+    """
+    Wird aufgerufen, sobald eine einzelne Task (topic mqttTester/results)
+    von client_id beendet gemeldet wird. Fügt die aktiven Verbrauchswerte
+    hinzu und berechnet Avg-Power, kWh usw.
+    """
     global df_client_power, client_task_done_counter, client_idle_start_time
+
     if client_id not in power_tracking:
         print(f"No Power-Tracking for {client_id} found!")
         return
@@ -144,6 +158,7 @@ def end_single_task_session(
     start_time = timing["start_time"]
     round_id = timing.get("round", current_round)
 
+    # Alle Leistungswerte zwischen Start und End sammeln
     relevant_power_values = [
         power for timestamp, power in power_tracking[client_id]
         if start_time <= timestamp <= end_time
@@ -167,8 +182,10 @@ def end_single_task_session(
     total_power_usage = avg_power * total_duration
     kwh = total_power_usage / 3600000
 
+    # Client-Task-Zähler inkrementieren
     client_task_done_counter[client_id] = client_task_done_counter.get(client_id, 0) + 1
 
+    # Wenn dieser Client alle ihm zugewiesenen Tasks erfüllt hat:
     if (
         task_count.get(client_id, 0) > 0 and
         client_task_done_counter[client_id] == task_count[client_id] and
@@ -177,6 +194,7 @@ def end_single_task_session(
         client_idle_start_time[client_id] = end_time
         print(f"🟡 Client {client_id} ist jetzt idle (alle Tasks erledigt)")
 
+    # Daten Frame ergänzen
     new_data = pd.DataFrame([{
         "round": round_id,
         "client_id": client_id,
@@ -192,7 +210,7 @@ def end_single_task_session(
         "num_of_power_values": len(relevant_power_values),
         "tasks_assigned": 1,
         "efficiency_per_task": kwh,
-        "efficiency": 1 / kwh if kwh > 0 else 0,
+        "efficiency": (1 / kwh) if kwh > 0 else 0,
         "total_duration": total_duration,
         "time_per_task": time_per_task,
     }])
@@ -218,7 +236,9 @@ def end_single_task_session(
         }
     })
 
+
 def aggregate_round_entries(round_number):
+    """Am Ende einer Runde: alle Einträge dieser Runde aggregieren."""
     global df_client_power
     round_entries = df_client_power[df_client_power["round"] == round_number]
     if round_entries.empty:
@@ -259,7 +279,12 @@ def aggregate_round_entries(round_number):
     df_client_power = pd.concat([df_client_power, aggregated_row], ignore_index=True)
     print(f"📊 Aggregierte Daten für Runde {round_number} hinzugefügt.")
 
+
 def load_tasks_from_file():
+    """
+    Lädt die Datei generated_tasks.txt und befüllt round_task_dict,
+    gruppiert nach 'round=…' aus den Aufgaben-Strings.
+    """
     global round_task_dict, task_count, finisher_counter, clients_with_tasks, task_num, current_round
     finisher_counter = 0
     clients_with_tasks = 0
@@ -290,7 +315,12 @@ def load_tasks_from_file():
     except Exception as e:
         print(f"Fehler beim Laden von {task_file}: {e}")
 
+
 def extract_features_from_task(task_string):
+    """
+    Extrahiere scenario und Base-Features (knowledge/activation/code/learning) aus dem Task-String.
+    Gibt Dictionary zurück.
+    """
     features = {}
     scenario_match = re.search(r'scenario=([^\s,]+)', task_string)
     if scenario_match:
@@ -306,6 +336,7 @@ def extract_features_from_task(task_string):
     features["code_base"] = extract_base("code_base")
     features["learning_base"] = extract_base("learning_base")
     return features
+
 
 def train_task_models(df_power):
     """
@@ -356,7 +387,9 @@ def train_task_models(df_power):
     joblib.dump(model_kwh, "model_kwh.pkl")
     print("✅ Task-Modelle gespeichert als 'model_duration.pkl' und 'model_kwh.pkl'")
 
+
 def load_models():
+    """Lädt, sofern vorhanden, die bereits gespeicherten Regressoren."""
     global model_duration, model_kwh
     try:
         model_duration = joblib.load("model_duration.pkl")
@@ -365,12 +398,14 @@ def load_models():
     except:
         print("⚠️ Keine gespeicherten Task-Modelle gefunden (verwende frisch trainieren).")
 
+
 def schedule_tasks_greedy(task_strings, candidate_clients):
     """
     Zuteilung der übergebenen task_strings an candidate_clients so,
     dass der Gesamt-kWh-Verbrauch (aktiv + Idle) minimal wird.
-    Greedy-Ansatz: iteriere Tasks, weise jedem Client zu, der
-    inkrementellen Anstieg an kWh am geringsten verursacht.
+    Greedy-Ansatz: iteriere Tasks, weise jedem
+    Client zu, der inkrementellen Anstieg an kWh am geringsten verursacht.
+    Pis werden für Non-apply-Szenarios per Schätzwert = inf ausgeschlossen.
     """
     # 1) Extrahiere Features für alle Tasks
     all_tasks = []
@@ -379,25 +414,30 @@ def schedule_tasks_greedy(task_strings, candidate_clients):
         all_tasks.append(feats)
 
     # 2) Für jeden Client und jede Task: Schätzung Dauer & kWh
-    #    Speichere in Matrizen: est_dur[c][i], est_kwh[c][i]
     est_dur = {c: [] for c in candidate_clients}
     est_kwh = {c: [] for c in candidate_clients}
     for c in candidate_clients:
         for feats in all_tasks:
-            row = feats.copy()
-            row["client_id"] = c
-            X_row = pd.DataFrame([row])
-            if model_duration is not None:
-                d = model_duration.predict(X_row)[0]
-                k = model_kwh.predict(X_row)[0]
+            scen = feats["scenario"]
+            # Wenn c ein Pi ist und Task != "apply", dann setze Schätzer auf "inf"
+            if client_type.get(c, "full") == "pi" and scen != "apply":
+                est_dur[c].append(float("inf"))
+                est_kwh[c].append(float("inf"))
             else:
-                # Falls kein Modell verfügbar, grobe Defaults
-                d = 10.0
-                k = 0.001
-            est_dur[c].append(d)
-            est_kwh[c].append(k)
+                row = feats.copy()
+                row["client_id"] = c
+                X_row = pd.DataFrame([row])
+                if model_duration is not None:
+                    d = model_duration.predict(X_row)[0]
+                    k = model_kwh.predict(X_row)[0]
+                else:
+                    # Falls kein Modell verfügbar, grobe Defaults
+                    d = 10.0
+                    k = 0.001
+                est_dur[c].append(d)
+                est_kwh[c].append(k)
 
-    # 3) Greedy-Zuteilung:
+    # 3) Greedy-Zuteilung basierend auf est_dur/est_kwh
     Assigned = {c: [] for c in candidate_clients}
     active_time = {c: 0.0 for c in candidate_clients}
     active_kwh = {c: 0.0 for c in candidate_clients}
@@ -408,28 +448,34 @@ def schedule_tasks_greedy(task_strings, candidate_clients):
         for c in candidate_clients
     }
 
-    # Wir erstellen Index-Liste der Tasks, die noch zu verteilen sind
     remaining = list(range(len(all_tasks)))
-    # Initiale Rundenlänge = 0
     round_len = 0.0
 
     while remaining:
         best_task, best_client, best_delta = None, None, float("inf")
         for i in remaining:
-            # Werte aller Clients für Task i vergleichen
+            scen = all_tasks[i]["scenario"]
             for c in candidate_clients:
+                # Wenn Pi & Non-apply, überspringen (wir haben est = inf gesetzt)
+                if client_type.get(c, "full") == "pi" and scen != "apply":
+                    continue
                 d_i = est_dur[c][i]
                 k_i = est_kwh[c][i]
+                if np.isinf(d_i) or np.isinf(k_i):
+                    continue
+
                 new_active_time_c = active_time[c] + d_i
-                new_round_len = max(round_len, new_active_time_c,
-                                    max(active_time[d] for d in candidate_clients if d != c))
-                # Alte Idle von c
+                new_round_len = max(
+                    round_len,
+                    new_active_time_c,
+                    max(active_time[d] for d in candidate_clients if d != c)
+                )
                 old_idle_c = round_len - active_time[c]
-                # Neue Idle von c
                 new_idle_c = new_round_len - new_active_time_c
                 delta_idle = new_idle_c - old_idle_c
                 delta_idle_kwh = idle_power[c] * max(delta_idle, 0.0)
                 delta_total = k_i + delta_idle_kwh
+
                 if delta_total < best_delta:
                     best_delta = delta_total
                     best_task = i
@@ -439,7 +485,6 @@ def schedule_tasks_greedy(task_strings, candidate_clients):
         Assigned[best_client].append(best_task)
         active_time[best_client] += est_dur[best_client][best_task]
         active_kwh[best_client] += est_kwh[best_client][best_task]
-        # Aktualisiere Rundenlänge
         round_len = max(active_time.values())
         remaining.remove(best_task)
 
@@ -450,13 +495,20 @@ def schedule_tasks_greedy(task_strings, candidate_clients):
             assignment[i] = c
     return assignment
 
+
 def distribute_tasks(client):
+    """
+    Verteilt die Tasks in round_task_dict[current_round] auf connected_clients.
+    Abhängig davon, ob model_duration existiert (Runde ≥2 und nach erstem Modelltraining),
+    wird entweder random (Runde 1–5) oder Greedy (ab Runde 6) verteilt.
+    Pis werden nur für apply-Aufgaben berücksichtigt.
+    """
     global task_list, clients_with_tasks, task_count, start_distribution, current_round, round_task_dict
     last_logged_round = 0
 
     while not stop_event.is_set():
         print("⏳ Warte auf neue Runde...")
-        task_event.wait()  # Blockiert, bis Event gesetzt wird
+        task_event.wait()  # Blockiert, bis event gesetzt
         print(f"✅ Neue Runde erkannt (Runde {current_round}), beginne Verteilung...")
 
         if not connected_clients:
@@ -471,64 +523,89 @@ def distribute_tasks(client):
                 task_event.clear()
                 continue
 
-        # 1. Wir haben eine Liste von „rohen“ Task-Strings aus generated_tasks.txt,
-        #    z.B. "round=2, ... scenario=foo, knowledge_base=…, ... "
-        #    Im Original-Manager wurde in dieser Phase immer zunächst
-        #    der Empfänger (receiver=…) ergänzt.
+        # ----- Prüfen, ob ausschließlich Pis online sind -----
+        only_pis = True
+        for c in connected_clients:
+            if client_type.get(c, "full") != "pi":
+                only_pis = False
+                break
+
+        # Falls nur Pis online sind, entfernen wir alle create/refine-Tasks
+        if only_pis:
+            filtered = []
+            for t in task_list:
+                scen = extract_features_from_task(t)["scenario"]
+                if scen == "apply":
+                    filtered.append(t)
+                else:
+                    print(f"⚠️ Runde {current_round}: Nur Pis verfügbar → entferne Task '{scen}' (kann nicht ausgeführt werden).")
+            task_list = filtered
 
         client_tasks = defaultdict(list)
         tasks = task_list.copy()
 
-        # --- Runde 1 oder kein ML-Modell: Zufallsverteilung ---
+        # --- Runde 1..5 oder kein ML-Modell: Zufallsverteilung, aber Pis nur für apply ---
         if current_round == 1 or model_duration is None:
             if last_logged_round != current_round:
                 print(f"Runde {current_round} - Zufällige Verteilung")
                 last_logged_round = current_round
 
             for t in tasks:
-                target_client = random.choice(list(connected_clients))
-                # Empfänger in den Task-String einfügen (wie im Original)
+                feats = extract_features_from_task(t)
+                scen = feats["scenario"]
+
+                # Kandidaten filtern: Wenn c ein Pi ist und scen != apply, skip
+                geeignet = []
+                for c in connected_clients:
+                    if client_type.get(c, "full") == "pi" and scen != "apply":
+                        continue
+                    geeignet.append(c)
+
+                if not geeignet:
+                    # Falls kein Full-Client im Pool (alle sind Pis) – und task ist non-apply,
+                    # dann haben wir task_list schon gefiltert (siehe oben),
+                    # also hier nur apply-Tasks in "tasks" übrig. Sollte also nie passieren.
+                    print(f"⚠️ Keine geeigneten Clients für Task '{scen}' → überspringe.")
+                    continue
+
+                target_client = random.choice(geeignet)
+                # Empfängermarkierung wie gehabt anhängen
                 if "receiver=" not in t:
                     t_with_receiver = t.rstrip('"') + f", receiver={target_client}\""
                 else:
                     t_with_receiver = re.sub(r'receiver=[^,"]*', f"receiver={target_client}", t)
                 client_tasks[target_client].append(t_with_receiver)
 
-        # --- Runde >=2 und ML-Modelle verfügbar: Hybrid mit Greedy-Scheduling ---
+        # --- Runde ≥2 und ML-Modelle existieren: Greedy-Scheduling ---
         else:
             if last_logged_round != current_round:
                 print(f"Runde {current_round} - ML Greedy-Verteilung")
                 last_logged_round = current_round
 
-            # schedule_tasks_greedy erwartet „reine“ Task-Strings (ohne receiver),
-            # extrahiert nur Features. Wir schicken ihm also zunächst die rohen Strings:
+            # Wenn ausschließlich Pis online sind, haben wir oben schon alle non-apply rausgeworfen.
+            # schedule_tasks_greedy zieht anhand client_type automatisch Pis für apply, PCs für alles.
             assignment = schedule_tasks_greedy(tasks, list(connected_clients))
 
-            # assignment ist eine Dict: { task_index: client_id, … }
             for idx, t in enumerate(tasks):
                 c = assignment[idx]
-                # Jetzt müssen wir denselben Task-String um „, receiver=c“ ergänzen:
                 if "receiver=" not in t:
                     t_with_receiver = t.rstrip('"') + f", receiver={c}\""
                 else:
                     t_with_receiver = re.sub(r'receiver=[^,"]*', f"receiver={c}", t)
                 client_tasks[c].append(t_with_receiver)
 
-        # 2. Versand: Aufgaben pro Client bündeln und verschicken
+        # ----- Versand: Tasks pro Client bündeln und rauspublizieren -----
         local_clients_with_tasks = 0
         for target_client, tasks_for_client in client_tasks.items():
-            # Wir entfernen das führende "round=…," im Payload, so wie im Original:
+            # Wie im Original: führende "round=..," entfernen
             task_payload = "\n".join([
                 re.sub(r"round=\d+,\s*", "", tt) for tt in tasks_for_client
             ])
 
             if target_client in connected_clients:
-                # erst SIGNAL um mit Rechnen zu starten
                 client.publish("start_stop/taskWorker", 1, qos=1)
-                # dann kommen die tatsächlichen Task‐Zeilen
                 client.publish(f"tasks/{target_client}", task_payload, qos=1)
 
-                # jede aufgeteilte Teilaufgabe = eine start_task_session()
                 for _ in tasks_for_client:
                     start_task_session(target_client)
 
@@ -538,9 +615,9 @@ def distribute_tasks(client):
             else:
                 print(f"⚠️ Ziel-Client {target_client} nicht verbunden. Überspringe.")
 
-            time.sleep(2)  # kleine Pause zwischen Clients
+            time.sleep(2)
 
-        # 3. Nach Versand aller Clients: leere die Aufgaben der aktuellen Runde
+        # Runde komplett verteilt → Reset
         with task_lock:
             round_task_dict[current_round] = []
 
@@ -550,11 +627,14 @@ def distribute_tasks(client):
 
 
 def monitor_clients():
+    """Periodisch ausgeben, welche Clients verbunden sind."""
     while not stop_event.is_set():
         print(f"Active clients: {connected_clients}")
         time.sleep(10)
 
+
 def on_connect(client, userdata, flags, rc):
+    """Sobald der Manager sich beim Broker verbindet, abonniere alle relevanten Topics."""
     print("Connected with result code " + str(rc))
     connected_clients.clear()
     client.subscribe(MQTT_Publish_Topic, qos=0)
@@ -564,7 +644,9 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe("ShellyVerbrauch/#")
     client.subscribe("finish/#")
 
+
 def get_shelly_apower_data_status_switch(topic, message):
+    """Verarbeite Shelly-Power-Meldungen (Status mit 'apower')"""
     client_id_json = topic.split("/")[1]
     if client_id_json in connected_clients:
         try:
@@ -583,7 +665,9 @@ def get_shelly_apower_data_status_switch(topic, message):
         except Exception as e:
             print(f"Unexpected error when processing {topic}: {e}")
 
+
 def get_shelly_apower_data_events(topic, message):
+    """Verarbeite Shelly-Power-Meldungen (Events mit 'switch:0')"""
     client_id_json = topic.split("/")[1]
     if client_id_json in connected_clients:
         try:
@@ -602,19 +686,28 @@ def get_shelly_apower_data_events(topic, message):
         except Exception as e:
             print(f"Unexpected error when processing {topic}: {e}")
 
+
 def handle_idle_clients(duration, stop_time):
+    """
+    Erfasst alle Clients (inkl. Pi) im Idle (= keine Tasks mehr), berechnet
+    ihre Idle-Power über die Differenz stop_time - idle_start und schreibt
+    die IDLE-Zeile in df_client_power.
+    """
     global df_client_power, power_tracking, connected_clients
+
     client_ids_all = list(
         set(task_count.keys())
         | set(client_idle_start_time.keys())
         | set(connected_clients)
     )
     print(f"handle_idle_clients gestartet mit duration={duration:.2f}, stop_time={stop_time:.2f}")
+
     for cid in client_ids_all:
         is_unassigned = cid not in task_count or task_count[cid] == 0
         is_early_finisher = cid in client_idle_start_time
         if not is_unassigned and not is_early_finisher:
             continue
+
         if is_unassigned:
             idle_start = stop_time - duration
             idle_duration = duration
@@ -659,7 +752,18 @@ def handle_idle_clients(duration, stop_time):
     client_idle_start_time.clear()
     client_task_done_counter.clear()
 
+
 def on_message(client, userdata, msg):
+    """
+    Alle eingehenden MQTT-Nachrichten durchlaufen diesen Callback:
+      - status/#  → Connected/Disconnected
+      - mqttTester/results → Task-Ergebnis (speichern)
+      - finish/#  → wenn alle Clients einer Runde fertig sind: Idle erfassen, aggregieren,
+                    Modell evtl. nach jeder 5. Runde neu trainieren
+      - task_generator → neue Aufgaben laden
+      - ShellyVerbrauch/# → Stromdaten
+      - "My name is … RPi=YES/NO" → Client meldet seine ID + ob Pi oder Full
+    """
     global task_list, task_count, finisher_counter, task_num, clients_with_tasks
     global stop_distribution, current_round, round_task_dict, start_distribution
 
@@ -669,6 +773,7 @@ def on_message(client, userdata, msg):
     if not topic.startswith("ShellyVerbrauch"):
         print(f"Message received on {msg.topic}: {message}")
 
+    # ────────────── status/# (Connected/Disconnected) ──────────────
     if topic.startswith("status/"):
         client_name = topic.split("/")[1]
         if msg.retain:
@@ -678,6 +783,7 @@ def on_message(client, userdata, msg):
         elif "Connected" in message:
             connected_clients.add(client_name)
 
+    # ────────────── mqttTester/results (Task-Ergebnis) ──────────────
     elif topic == "mqttTester/results":
         if "Task executed" in message and "scenario=" in message:
             print("📥 Eingehende Task-Ergebnis-Meldung:", message)
@@ -686,18 +792,22 @@ def on_message(client, userdata, msg):
                 cid = match.group(1)
                 scenario = match.group(2)
                 end_time = time.time()
+
                 def extract_base(key):
                     m = re.search(rf'{key}=([^,]+?)(?:,| - Task executed|$)', message)
                     return m.group(1).strip() if m else "-"
+
                 knowledge_base = extract_base("knowledge_base")
                 activation_base = extract_base("activation_base")
                 code_base = extract_base("code_base")
                 learning_base = extract_base("learning_base")
+
                 end_single_task_session(
                     cid, scenario, end_time,
                     knowledge_base, activation_base, code_base, learning_base
                 )
 
+    # ────────────── finish/# (wenn alle Aufgaben einer Runde erledigt) ──────────────
     elif topic.startswith("finish/"):
         finisher_counter += 1
         if message.startswith("Finished"):
@@ -715,6 +825,7 @@ def on_message(client, userdata, msg):
             aggregate_round_entries(current_round)
             task_count.clear()
 
+            # CSV-Export
             script_dir = os.path.dirname(os.path.realpath(__file__))
             log_directory_power = os.path.join(script_dir, "power_logs_ml_2")
             os.makedirs(log_directory_power, exist_ok=True)
@@ -724,13 +835,15 @@ def on_message(client, userdata, msg):
             with write_to_power_log_lock:
                 df_client_power.to_csv(file_path, index=False, encoding="utf-8")
 
-            if len(task_records) >= 10:
+            # Nur alle 5 Runden neu trainieren:
+            if current_round % 5 == 0 and current_round >= 5:
+                print(f"🔄 Runde {current_round} abgeschlossen ⇒ trainiere Task-Modelle auf Runden 1–{current_round}")
                 train_task_models(df_client_power)
+                load_models()
             else:
-                print("⚠️ Noch zu wenig Daten zum Trainieren der Task-Modelle.")
+                print(f"ℹ️ Runde {current_round} abgeschlossen ⇒ kein Retraining (erst alle 5 Runden)")
 
-            load_models()
-
+            # Runde weiterschalten
             current_round += 1
             finisher_counter = 0
             clients_with_tasks = 0
@@ -740,6 +853,7 @@ def on_message(client, userdata, msg):
             else:
                 print("🎉 Alle Runden abgeschlossen.")
 
+    # ────────────── task_generator (neue Aufgaben laden) ──────────────
     elif topic == "task_generator":
         print("⚙️ Task generator triggered. Lade Aufgaben...")
         load_tasks_from_file()
@@ -752,15 +866,30 @@ def on_message(client, userdata, msg):
         else:
             print("⚠️ Keine Aufgaben für Runde 1 gefunden.")
 
+    # ────────────── Shelly-Verbrauchsdaten ──────────────
     elif topic.startswith("ShellyVerbrauch/") and "status" in topic and "switch:0" in topic:
         get_shelly_apower_data_status_switch(topic, message)
     elif topic.startswith("ShellyVerbrauch/") and "events" in topic:
         get_shelly_apower_data_events(topic, message)
 
+    # ────────────── Client meldet sich: “My name is … RPi=YES/NO” ──────────────
     match = re.search(r"My name is (\w+)", message)
     if match:
-        connected_pc = match.group(1)
-        connected_clients.add(connected_pc)
+        cid = match.group(1)
+        connected_clients.add(cid)
+        # Prüfen, ob “RPi=YES” oder “RPi=NO” übergeben wurde:
+        rpi_match = re.search(r"RPi=(YES|NO)", message)
+        if rpi_match:
+            if rpi_match.group(1) == "YES":
+                client_type[cid] = "pi"
+            else:
+                client_type[cid] = "full"
+        else:
+            # Falls nicht explizit angegeben, standardmäßig “full”
+            client_type[cid] = "full"
+        print(f"ℹ️ Client '{cid}' registriert als Typ '{client_type[cid]}'")
+        return
+
 
 if __name__ == '__main__':
     client = mqtt.Client()

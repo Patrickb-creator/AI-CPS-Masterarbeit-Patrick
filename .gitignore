@@ -16,6 +16,8 @@ code/taskManager/power_logs_random
 code/taskManager/power_logs_ml
 code/taskManager/power_logs_ml_2
 code/taskManager/power_logs_heuristic
+code/taskManager/model_duration.pkl
+code/taskManager/model_kwh.pkl
 code/messageClient/client_id.txt
 code/otherTaskGenerators
 power_data_analysis
