@@ -98,6 +98,8 @@ def on_message(client, userdata, msg):
     print(message)
 
 def task_generator(num_rounds, tasks_per_round, MQTT_topic, host, client, MQTT_Username="user1", MQTT_Password="WhHe1NPfDBJ%",):
+    # Set seed to ensure reproducibility
+    random.seed(42)
     scenarios = [
         "apply_annSolution"
     ,

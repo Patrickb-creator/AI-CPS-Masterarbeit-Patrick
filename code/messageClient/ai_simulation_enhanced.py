@@ -322,6 +322,8 @@ if __name__ == '__main__':
     else:
     # Kein Argument vorhanden oder Argument ist leer
         print("No argument found or argument is empty.")
+        client_id = get_or_generate_client_id()
+    print(f"This is the client with id {client_id}.")
 
     # If needed and confifured
     MQTT_Username = "user1"
@@ -335,8 +337,7 @@ if __name__ == '__main__':
     # If needed and configured
     client.username_pw_set(username=MQTT_Username, password=MQTT_Password)
 
-    client_id = get_or_generate_client_id()
-    print(f"This is the client with id {client_id}.")
+    
 
     # Set Last Will Message
     client.will_set(f"status/{client_id}", "Disconnected", qos=1, retain=False)
