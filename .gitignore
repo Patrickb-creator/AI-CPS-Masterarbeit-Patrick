@@ -28,3 +28,5 @@ code/CSV-Auswertung_random.ipynb
 code/CSV-Auswertung_ml.ipynb
 code/CSV-Auswertung_greedy.ipynb
 code/taskGenerator/generated_tasks.txt
+code/taskGenerator/task_generator
+code/taskManager/task_manager_ml_old
