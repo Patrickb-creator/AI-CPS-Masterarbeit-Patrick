@@ -15,11 +15,16 @@ code/taskManager/power_logs_green
 code/taskManager/power_logs_random
 code/taskManager/power_logs_ml
 code/taskManager/power_logs_ml_2
+code/taskManager/power_logs_ml_2_final
 code/taskManager/power_logs_heuristic
+code/taskManager/power_logs_random_final
 code/taskManager/model_duration.pkl
 code/taskManager/model_kwh.pkl
 code/messageClient/client_id.txt
 code/otherTaskGenerators
 power_data_analysis
 code/CSV_Auswertung.ipynb
+code/CSV-Auswertung_random.ipynb
+code/CSV-Auswertung_ml.ipynb
+code/CSV-Auswertung_greedy.ipynb
 code/taskGenerator/generated_tasks.txt

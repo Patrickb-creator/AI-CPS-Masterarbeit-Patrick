@@ -34,7 +34,12 @@ client_task_done_counter = {}      # Wie viele Tasks ein Client abgeschlossen ha
 client_idle_start_time = {}        # Wann ein Client idle geworden ist
 round_task_dict = {}
 task_records = []
-GREEDY_START_ROUND = 6
+
+# Greedy parameters
+GREEDY_START_ROUND = 6             # Ab welcher Runde Greedy verwendet wird
+SLIDING_WINDOW_SIZE = 5            # Nur die letzten 5 Runden betrachten
+EPSILON = 0.05                     # Epsilon für gelegentliche Exploration
+
 last_logged_random_round = 0
 last_logged_greedy_round = 0
 
@@ -351,24 +356,26 @@ def extract_features_from_task(task_string):
 
 def assign_task_to_client_greedy(task_string, candidate_clients, current_round):
     """
-    Greedy-Algorithmus, der anhand historischer kWh/s Werte die am wenigsten 
-    stromverbrauchenden Clients bevorzugt. Berücksichtigt auch IDLE-Verbrauch.
+    Greedy-Algorithmus: wählt den Client mit minimalem kWh/s auf Basis der
+    letzten SLIDING_WINDOW_SIZE Runden (inkl. IDLE).
     """
     scenario = extract_features_from_task(task_string)["scenario"]
     best_client = None
     best_metric = None
-
+    # Sliding window: nur die letzten SLIDING_WINDOW_SIZE Runden betrachten
+    window_start = max(1, current_round - SLIDING_WINDOW_SIZE)
     for c in candidate_clients:
-        # Filter alle bisherigen Einträge (inkl. IDLE!) für diesen Client
-        hist = df_client_power[df_client_power["client_id"] == c]
+        hist = df_client_power[
+            (df_client_power["client_id"] == c) &
+            (df_client_power["round"] >= window_start)
+        ]
         if not hist.empty:
             total_kwh = hist["kwh"].sum()
             total_duration = hist["total_duration"].sum()
             metric = total_kwh / total_duration if total_duration > 0 else float('inf')
         else:
-            metric = float('inf')  # Wenn keine Daten, setzen wir hoch
+            metric = float('inf')  # Keine Daten => hoch setzen
 
-        # Greedy: minimaler kWh/s
         if best_metric is None or metric < best_metric:
             best_metric = metric
             best_client = c
@@ -376,7 +383,7 @@ def assign_task_to_client_greedy(task_string, candidate_clients, current_round):
     if best_client is None:
         best_client = random.choice(list(candidate_clients))
 
-    print(f"⚙️ [Greedy] Runde {current_round} – Aufgabe '{scenario}' zugewiesen an {best_client}")
+    print(f"⚙️ [Greedy] Runde {current_round} – Aufgabe '{scenario}' zugewiesen an {best_client} (kWh/s={best_metric:.6f})")
     return best_client
 
 def find_receiver(task):
@@ -393,7 +400,7 @@ def find_receiver(task):
 def distribute_tasks(client):
     """
     Liest round_task_dict[current_round], filtert nach Pi/Full pro Task,
-    weist per Zufall oder Greedy zu und sendet sie an die Clients.
+    wendet ε-Greedy oder Greedy an und sendet Tasks an die Clients.
     """
     global task_list, clients_with_tasks, task_count, start_distribution, current_round, round_task_dict
     global last_logged_random_round, last_logged_greedy_round
@@ -416,6 +423,7 @@ def distribute_tasks(client):
                 continue
 
         client_tasks = defaultdict(list)
+
         for task in task_list:
             round_match = re.search(r'round=(\d+)', task)
             round_number = int(round_match.group(1)) if round_match else current_round
@@ -425,16 +433,15 @@ def distribute_tasks(client):
                 print(f"Runde {round_number} - Zufällige Verteilung")
                 last_logged_random_round = round_number
             elif round_number >= GREEDY_START_ROUND and last_logged_greedy_round != round_number:
-                print(f"Runde {round_number} - Greedy Verteilung")
+                print(f"Runde {round_number} - Greedy Verteilung (ε={EPSILON}, Fenster={SLIDING_WINDOW_SIZE})")
                 last_logged_greedy_round = round_number
 
-            # Erstelle Kandidatenliste unter Berücksichtigung von Pi/Full
+            # Kandidatenliste unter Berücksichtigung von Pi/Full
             scen = extract_features_from_task(task)["scenario"]
             valid_candidates = []
             only_pis = all(client_type.get(c, "full") == "pi" for c in connected_clients)
 
             if only_pis and scen != "apply":
-                # Wenn nur Pis online sind und Task nicht 'apply', überspringen
                 print(f"⚠️ Runde {round_number}: Nur Pis online, entferne Task '{scen}'.")
                 continue
 
@@ -451,9 +458,14 @@ def distribute_tasks(client):
             if round_number < GREEDY_START_ROUND:
                 target_client = random.choice(valid_candidates)
             else:
-                target_client = assign_task_to_client_greedy(task, valid_candidates, round_number)
+                # ε-Greedy Exploration
+                if random.random() < EPSILON:
+                    target_client = random.choice(valid_candidates)
+                    print(f"   → ε-Exploration: zufällig {target_client}")
+                else:
+                    target_client = assign_task_to_client_greedy(task, valid_candidates, round_number)
 
-            # Empfänger in den Task-String einfügen
+            # Empfänger in Task-String einfügen
             if "receiver=" not in task:
                 task_with_receiver = task.rstrip('"') + f", receiver={target_client}\""
             else:

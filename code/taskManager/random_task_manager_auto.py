@@ -647,10 +647,10 @@ def on_message(client, userdata, msg):
 
             # CSV Export
             script_dir = os.path.dirname(os.path.realpath(__file__))
-            log_directory_power = os.path.join(script_dir, "power_logs_random")
+            log_directory_power = os.path.join(script_dir, "power_logs_random_final")
             os.makedirs(log_directory_power, exist_ok=True)
             timestamp = time.strftime("%Y-%m-%d %H-%M-%S")
-            file_path = os.path.join(log_directory_power, f"{timestamp}_power-log-random_{task_num}.csv")
+            file_path = os.path.join(log_directory_power, f"{timestamp}_power-log-random_final{task_num}.csv")
             print("📁 Speichere Power-Log:", file_path)
             with write_to_power_log_lock:
                 df_client_power.to_csv(file_path, index=False, encoding="utf-8")
